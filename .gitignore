@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+*.pyc
+
+# Backend runtime data
+backend/data/
+backend/*.db
+backend/*.db-journal
+.env
+backend/.env
+
+# iOS / Xcode
+ios/**/*.xcodeproj
+ios/**/xcuserdata/
+ios/**/*.xcworkspace/xcuserdata/
+ios/DerivedData/
+ios/.build/
+ios/**/.swiftpm/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
