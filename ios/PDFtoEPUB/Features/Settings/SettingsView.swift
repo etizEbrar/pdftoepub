@@ -4,26 +4,49 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
+    @State private var connectionState: ConnectionState = .untested
+
+    enum ConnectionState: Equatable {
+        case untested
+        case checking
+        case reachable(provider: String)
+        case unreachable(String)
+    }
+
     var body: some View {
         @Bindable var settings = settings
 
         NavigationStack {
             Form {
                 Section {
-                    TextField("http://localhost:8000", text: $settings.baseURLString)
+                    TextField("http://192.168.1.10:8000", text: $settings.baseURLString)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .onChange(of: settings.baseURLString) { _, _ in
+                            connectionState = .untested
+                        }
+
+                    Button {
+                        Task { await testConnection() }
+                    } label: {
+                        HStack {
+                            Text("Test connection")
+                            Spacer()
+                            connectionIndicator
+                        }
+                    }
+                    .disabled(connectionState == .checking)
                 } header: {
                     Text("Backend address")
                 } footer: {
-                    Text("Where your conversion server is running. This build ships without a hosted backend — run the included server and point the app at it.")
+                    Text(addressGuidance)
                 }
 
                 Section {
                     LabeledContent("AI assistance", value: "Optional, off by default")
                 } footer: {
-                    Text("Conversions run entirely with deterministic, local processing and never require a paid AI service. Optional AI review is configured on your own server, not in this app.")
+                    Text("Conversions run entirely with deterministic, local processing — including OCR, tables, formulas and right-to-left text — and never require a paid AI service. Optional AI review is configured on your own server, not in this app.")
                 }
 
                 Section {
@@ -40,5 +63,65 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var addressGuidance: String {
+        #if targetEnvironment(simulator)
+        return "Where your conversion server is running. In the Simulator, http://localhost:8000 works."
+        #else
+        return "Where your conversion server is running. On a real iPhone, use your computer's address on the network (for example http://192.168.1.10:8000) — \"localhost\" would point at this phone. Both devices must be on the same Wi-Fi."
+        #endif
+    }
+
+    @ViewBuilder
+    private var connectionIndicator: some View {
+        switch connectionState {
+        case .untested:
+            EmptyView()
+        case .checking:
+            ProgressView().controlSize(.small)
+        case .reachable(let provider):
+            Label(provider == "none" ? "Connected" : "Connected (\(provider))", systemImage: "checkmark.circle.fill")
+                .font(.footnote)
+                .foregroundStyle(.green)
+                .labelStyle(.titleAndIcon)
+        case .unreachable(let message):
+            Label(message, systemImage: "xmark.circle.fill")
+                .font(.footnote)
+                .foregroundStyle(.red)
+                .labelStyle(.titleAndIcon)
+        }
+    }
+
+    private func testConnection() async {
+        guard let baseURL = settings.baseURL else {
+            connectionState = .unreachable("Invalid URL")
+            return
+        }
+        connectionState = .checking
+        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
+        request.timeoutInterval = 8
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                connectionState = .unreachable("Server error")
+                return
+            }
+            let health = try? JSONDecoder().decode(HealthResponse.self, from: data)
+            connectionState = .reachable(provider: health?.aiProvider ?? "none")
+        } catch {
+            connectionState = .unreachable("Not reachable")
+        }
+    }
+}
+
+private struct HealthResponse: Decodable {
+    let status: String
+    let aiProvider: String
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case aiProvider = "ai_provider"
     }
 }

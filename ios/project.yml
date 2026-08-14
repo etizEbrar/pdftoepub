@@ -39,12 +39,18 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # A physical device reaches the development backend over the local
+        # network by IP address, which plain ATS blocks. NSAllowsLocalNetworking
+        # permits http to local addresses only — it does not weaken transport
+        # security for anything on the public internet.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
+          NSAllowsLocalNetworking: true
           NSExceptionDomains:
             localhost:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: false
+        NSLocalNetworkUsageDescription: PDF to EPUB connects to the conversion server you run on your own computer to convert your PDFs.
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:

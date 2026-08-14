@@ -8,6 +8,16 @@ struct APIErrorResponse: Codable {
 }
 
 enum APIError: LocalizedError, Equatable {
+    /// The overwhelmingly common cause of a failed connection is that the app is
+    /// pointed at "localhost" while running on a physical device, where that
+    /// means the phone itself rather than the computer running the server. Say
+    /// so, instead of blaming the user's internet.
+    static let unreachableBackendMessage = """
+        Couldn't reach the conversion server. If you're running it on your \
+        computer, open Settings and enter that computer's address on your \
+        network — on a real iPhone, "localhost" points at the phone itself.
+        """
+
     case invalidURL
     case notConnected
     case timedOut
@@ -26,7 +36,7 @@ enum APIError: LocalizedError, Equatable {
         case .invalidURL:
             return "The backend address in Settings isn't a valid URL."
         case .notConnected:
-            return "You appear to be offline. Check your connection and try again."
+            return APIError.unreachableBackendMessage
         case .timedOut:
             return "The server took too long to respond. Your original PDF was not modified."
         case .server(_, let message):
