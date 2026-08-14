@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from app.models.document import BlockRole, StructuralNode
-from app.pipeline.footnotes import MARKER_OPEN, MARKER_SCAN_RE
+from app.pipeline.footnotes import MARKER_OPEN, MARKER_SCAN_RE, strip_emphasis_sentinels
 
 # Headings that open a collected notes section at the back of a book or chapter.
 _ENDNOTE_HEADING_RE = re.compile(
@@ -31,7 +31,9 @@ _REFERENCE_BEARING_ROLES = {
 def _is_endnote_section_heading(node: StructuralNode) -> bool:
     if node.role != BlockRole.HEADING:
         return False
-    return bool(_ENDNOTE_HEADING_RE.match(node.text.strip()))
+    # Strip inline-emphasis sentinels: a bold "Notes" heading carries them and
+    # would otherwise never match.
+    return bool(_ENDNOTE_HEADING_RE.match(strip_emphasis_sentinels(node.text).strip()))
 
 
 def find_endnote_sections(nodes: list[StructuralNode]) -> list[tuple[int, int]]:
@@ -54,7 +56,7 @@ def find_endnote_sections(nodes: list[StructuralNode]) -> list[tuple[int, int]]:
             candidate = nodes[lookahead]
             if candidate.role != BlockRole.HEADING:
                 continue
-            if _CHAPTER_SCOPE_RE.match(candidate.text.strip()):
+            if _CHAPTER_SCOPE_RE.match(strip_emphasis_sentinels(candidate.text).strip()):
                 continue  # chapter subheading *inside* the notes section
             if (candidate.level or 1) <= section_level:
                 end = lookahead
@@ -79,7 +81,7 @@ def classify_endnote_sections(nodes: list[StructuralNode]) -> int:
 
         for node in nodes[start + 1 : end]:
             if node.role == BlockRole.HEADING:
-                scope = _CHAPTER_SCOPE_RE.match(node.text.strip())
+                scope = _CHAPTER_SCOPE_RE.match(strip_emphasis_sentinels(node.text).strip())
                 if scope:
                     current_chapter = scope.group(1)
                 continue

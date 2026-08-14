@@ -49,11 +49,21 @@ struct ConversionResultView: View {
         }
     }
 
+    /// A valid EPUB is not automatically a good ebook. When the backend reports
+    /// structural shortfalls the header says so plainly rather than showing an
+    /// unqualified success.
+    private var needsReview: Bool {
+        report.needsReview || report.contentIntegritySuspicious
+    }
+
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
-            Label("Conversion complete", systemImage: "checkmark.seal.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
+            Label(
+                needsReview ? "Converted — worth reviewing" : "Conversion complete",
+                systemImage: needsReview ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(needsReview ? Color.orange : Color.accentColor)
 
             Text(report.title ?? document.filename)
                 .font(.title3.weight(.semibold))
@@ -80,11 +90,21 @@ struct ConversionResultView: View {
             statRow("Headings", value: "\(report.headingCount)")
             if report.footnoteCount > 0 {
                 Divider()
-                statRow("Footnotes", value: "\(report.footnoteCount)")
+                // How many notes are actually reachable matters more than how
+                // many exist, so both numbers are shown together.
+                statRow(
+                    "Footnotes",
+                    value: "\(report.footnotesLinked) linked / \(report.footnoteCount)",
+                    valueColor: report.footnotesLinked < report.footnoteCount ? .orange : .secondary
+                )
             }
             if report.endnoteCount > 0 {
                 Divider()
-                statRow("Endnotes", value: "\(report.endnoteCount)")
+                statRow(
+                    "Endnotes",
+                    value: "\(report.endnotesLinked) linked / \(report.endnoteCount)",
+                    valueColor: report.endnotesLinked < report.endnoteCount ? .orange : .secondary
+                )
             }
             if report.imageCount > 0 {
                 Divider()
@@ -147,20 +167,20 @@ struct ConversionResultView: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 
-    /// Surfaced rather than hidden: the spec requires that unexpected content
-    /// loss is flagged for review, never silently reported as a clean success.
+    /// Surfaced rather than hidden: structural shortfalls and unexpected content
+    /// loss are reported, never silently presented as a clean success.
     @ViewBuilder
     private var integrityWarningCard: some View {
-        if report.contentIntegritySuspicious {
+        if needsReview {
             VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
-                Label("Needs review", systemImage: "exclamationmark.triangle.fill")
+                Label("What to check", systemImage: "info.circle.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.orange)
-                Text("Some of the source document may not have carried over. Your original PDF was not modified.")
+                Text("The EPUB is valid and readable, but some structure couldn't be reconstructed with confidence. Your original PDF was not modified.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ForEach(report.contentIntegrityNotes.prefix(3), id: \.self) { note in
+                ForEach(reviewNotes, id: \.self) { note in
                     Text("• \(note)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -171,6 +191,12 @@ struct ConversionResultView: View {
             .cardBackground()
             .accessibilityElement(children: .combine)
         }
+    }
+
+    private var reviewNotes: [String] {
+        var notes = report.reviewReasons
+        if notes.isEmpty { notes = report.contentIntegrityNotes }
+        return Array(notes.prefix(4))
     }
 
     private func percent(_ ratio: Double) -> String {

@@ -50,7 +50,34 @@ def typical_page_text_length(doc: fitz.Document, sample_limit: int = 400) -> int
     return int(statistics.median(non_empty)) if non_empty else 0
 
 
-def classify_page(page: fitz.Page, typical_text_length: int = 0) -> PageTextKind:
+# Share of pages that must look text-complete before the document is treated as
+# having a pervasive text layer.
+_PERVASIVE_TEXT_LAYER_RATIO = 0.70
+# On such a document, only a page with almost nothing at all is worth OCR: a
+# chapter opener legitimately carries just a number and a title, and re-reading
+# it replaces good native text with worse OCR text — which cost this pipeline
+# its chapter headings on a real book.
+_PERVASIVE_MIN_CHARS = 20
+
+
+def has_pervasive_text_layer(doc: fitz.Document, typical_text_length: int) -> bool:
+    if not typical_text_length:
+        return False
+    complete = 0
+    considered = 0
+    for i in range(doc.page_count):
+        chars = len(doc[i].get_text("text").strip())
+        if chars == 0:
+            continue
+        considered += 1
+        if chars >= typical_text_length * _COMPLETE_TEXT_DENSITY_RATIO:
+            complete += 1
+    return bool(considered) and (complete / considered) >= _PERVASIVE_TEXT_LAYER_RATIO
+
+
+def classify_page(
+    page: fitz.Page, typical_text_length: int = 0, pervasive_text_layer: bool = False
+) -> PageTextKind:
     """Decide how a single page's text should be obtained.
 
     This is the gate that keeps OCR cheap: a 500-page native-text book answers
@@ -66,6 +93,12 @@ def classify_page(page: fitz.Page, typical_text_length: int = 0) -> PageTextKind
     # before image coverage, because a scanned-with-text-layer book has a
     # full-page image on every page and would otherwise all be re-read.
     if typical_text_length and native_chars >= typical_text_length * _COMPLETE_TEXT_DENSITY_RATIO:
+        return PageTextKind.NATIVE
+
+    # On a book whose text layer is reliable everywhere else, a short page is
+    # genuinely short — a chapter opener, a dedication — not a failed
+    # extraction. Trust it rather than overwriting it with OCR.
+    if pervasive_text_layer and native_chars >= _PERVASIVE_MIN_CHARS:
         return PageTextKind.NATIVE
 
     coverage = image_coverage_ratio(page)
@@ -88,7 +121,10 @@ def classify_page(page: fitz.Page, typical_text_length: int = 0) -> PageTextKind
 
 def classify_document(doc: fitz.Document) -> dict[int, PageTextKind]:
     typical = typical_page_text_length(doc)
-    return {i + 1: classify_page(doc[i], typical) for i in range(doc.page_count)}
+    pervasive = has_pervasive_text_layer(doc, typical)
+    return {
+        i + 1: classify_page(doc[i], typical, pervasive) for i in range(doc.page_count)
+    }
 
 
 def pages_needing_ocr(page_kinds: dict[int, PageTextKind]) -> list[int]:

@@ -4,6 +4,7 @@ import re
 import statistics
 
 from app.models.document import Block, BlockRole, StructuralNode
+from app.pipeline import headings as headings_module
 
 BULLET_RE = re.compile(r"^[•●○◦▪‣–\-\*]\s+")
 NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
@@ -66,6 +67,36 @@ def _first_line(text: str) -> str:
     return text.split("\n", 1)[0].strip()
 
 
+# A note set at 0.75x body or smaller is unambiguously note-sized. Between that
+# and 0.85x, type is often just a slightly tighter setting of ordinary prose, so
+# an opening marker is required as corroboration. Without this second gate,
+# paragraph continuations low on the page were being rendered as footnotes.
+_FOOTNOTE_CLEAR_SIZE_RATIO = 0.75
+_FOOTNOTE_MAX_SIZE_RATIO = 0.90
+_FOOTNOTE_PAGE_FRACTION = 0.66
+
+
+def _looks_like_footnote_body(
+    block: Block, body_size: float, page_has_body_text: bool = True
+) -> bool:
+    if not block.font_size or not body_size:
+        return False
+    if block.bbox[1] <= block.page_height * _FOOTNOTE_PAGE_FRACTION:
+        return False
+    # A footnote annotates body text, so there must be body text above it. A
+    # copyright page is entirely small type with nothing to annotate; without
+    # this the publisher's address and phone numbers become footnotes.
+    if not page_has_body_text:
+        return False
+
+    ratio = block.font_size / body_size
+    if ratio > _FOOTNOTE_MAX_SIZE_RATIO:
+        return False
+    if ratio <= _FOOTNOTE_CLEAR_SIZE_RATIO:
+        return True
+    return bool(NOTE_ENTRY_RE.match(block.text.strip()))
+
+
 def classify_blocks(
     ordered_blocks: list[Block], furniture: dict[str, BlockRole] | None = None
 ) -> list[StructuralNode]:
@@ -79,7 +110,19 @@ def classify_blocks(
     furniture = furniture or {}
     text_blocks = [b for b in ordered_blocks if b.kind == "text" and b.block_id not in furniture]
     body_size = body_font_size(text_blocks)
+    pages_with_body_text = {
+        b.page
+        for b in text_blocks
+        if b.font_size and body_size and b.font_size >= body_size * _FOOTNOTE_MAX_SIZE_RATIO
+    }
     line_gap = _typical_line_gap(text_blocks)
+    # Page-level context for the heading scorer: a chapter opener typically
+    # sits alone on a page that carries far less text than the book's norm.
+    page_char_counts: dict[int, int] = {}
+    first_content_block: dict[int, str] = {}
+    for b in text_blocks:
+        page_char_counts[b.page] = page_char_counts.get(b.page, 0) + len(b.text.strip())
+        first_content_block.setdefault(b.page, b.block_id)
     left_margins: dict[int, float] = {}
     for b in text_blocks:
         key = b.column
@@ -118,33 +161,30 @@ def classify_blocks(
         first_line = _first_line(text)
         gap_above = _gap_above(ordered_blocks, i)
         gap_below = _gap_below(ordered_blocks, i)
-        isolated = gap_above > line_gap * 1.6 and gap_below > line_gap * 1.2
-        is_short = len(text) <= 140 and "\n" not in text.strip("\n")[:141]
-        ends_with_terminal = bool(text) and text[-1] in TERMINAL_PUNCT
         indented = b.bbox[0] > left_margins.get(b.column, b.bbox[0]) + max(body_size * 1.2, 8)
 
         role = BlockRole.PARAGRAPH
         level = None
         confidence = 0.85
+        evidence: list[str] = []
 
-        looks_like_heading = (
-            is_short
-            and not ends_with_terminal
-            and (b.bold or size_ratio >= 1.15 or (first_line.isupper() and len(first_line) > 2))
-            and size_ratio >= 1.05
+        # Multi-signal heading scoring (see pipeline/headings.py). Typography
+        # alone is useless on a scanned book re-set from an OCR layer, where
+        # nearly every glyph is the same size.
+        heading_evidence = headings_module.score_heading(
+            b,
+            body_size,
+            gap_above=gap_above,
+            gap_below=gap_below,
+            line_gap=line_gap,
+            page_char_count=page_char_counts.get(b.page, 0),
+            is_first_content_block_on_page=first_content_block.get(b.page) == b.block_id,
         )
-        if looks_like_heading and isolated:
+        if heading_evidence.score >= headings_module.HEADING_THRESHOLD:
             role = BlockRole.HEADING
             level = _heading_level(size_ratio)
-            strong = (b.bold and size_ratio >= 1.15) or size_ratio >= 1.4
-            confidence = 0.95 if strong else 0.75
-        elif looks_like_heading and not isolated:
-            # Same typographic signal but not visually isolated — still plausible
-            # (e.g. a heading immediately followed by its first paragraph) but
-            # lower confidence since isolation is a strong independent signal.
-            role = BlockRole.HEADING
-            level = _heading_level(size_ratio)
-            confidence = 0.65
+            confidence = heading_evidence.confidence
+            evidence = heading_evidence.signals
         elif BULLET_RE.match(first_line) or NUMBERED_RE.match(first_line):
             # PyMuPDF sometimes groups several adjacent bulleted/numbered lines
             # into one block when the vertical gap between them is small. If
@@ -172,7 +212,7 @@ def classify_blocks(
         elif indented and b.italic:
             role = BlockRole.QUOTE
             confidence = 0.7
-        elif b.font_size and body_size and b.font_size < body_size * 0.85 and b.bbox[1] > b.page_height * 0.75:
+        elif _looks_like_footnote_body(b, body_size, b.page in pages_with_body_text):
             # Several notes stacked in the footnote area are usually merged into
             # one block. When every line opens with its own marker they are
             # distinct notes, and must be split or they'd all link to whichever
@@ -205,6 +245,8 @@ def classify_blocks(
                 bold=b.bold,
                 italic=b.italic,
                 page=b.page,
+                heading_scale=size_ratio if role == BlockRole.HEADING else None,
+                evidence=evidence,
             )
         )
 

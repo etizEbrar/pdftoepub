@@ -18,6 +18,7 @@ from app.pipeline import (
     extract,
     footnotes,
     headers_footers,
+    headings as headings_module,
     paragraphs,
     reading_order,
     structure,
@@ -260,13 +261,19 @@ def _execute_pipeline(job: Job) -> None:
         furniture = headers_footers.detect_furniture(blocks_by_page)
 
         body_size = structure.body_font_size(text_blocks)
-        footnotes.mark_reference_candidates(
-            [b for b in text_blocks if b.block_id not in furniture], body_size
-        )
+        content_blocks = [b for b in text_blocks if b.block_id not in furniture]
+        # Two passes: find which note numbers actually exist on each page, then
+        # use that as the evidence gate when recovering reference markers that
+        # OCR welded onto the preceding word.
+        note_numbers = footnotes.collect_note_numbers_by_page(content_blocks, body_size)
+        footnotes.mark_reference_candidates(content_blocks, body_size, note_numbers)
 
         nodes = structure.classify_blocks(ordered_blocks, furniture)
 
         blocks_by_id = {b.block_id: b for b in all_blocks}
+        # "1" set above "Kurban" is one chapter heading, not two.
+        headings_module.merge_division_numbers(nodes)
+        headings_module.assign_heading_levels(nodes)
 
         # Tables first: their cells are short, ragged-right lines that would
         # otherwise look exactly like verse. Consuming them here means verse

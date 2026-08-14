@@ -53,14 +53,39 @@ def slugify(text: str, fallback: str) -> str:
     return slug or fallback
 
 
+_MIN_CHAPTERS_FOR_USEFUL_NAV = 2
+
+
+def _choose_split_level(nodes: list[StructuralNode]) -> int | None:
+    """Pick the heading level to break chapters at.
+
+    Not simply "level 1": a one-off cover or half-title often occupies the
+    largest scale in a book, so splitting strictly on level 1 yields a single
+    chapter containing the entire text. The shallowest level that actually
+    produces several divisions is the one a reader would recognise as chapters.
+    """
+    counts: dict[int, int] = {}
+    for node in nodes:
+        if node.role == _HEADING_SPLIT_ROLE and node.level:
+            counts[node.level] = counts.get(node.level, 0) + 1
+    if not counts:
+        return None
+
+    cumulative = 0
+    for level in sorted(counts):
+        cumulative += counts[level]
+        if cumulative >= _MIN_CHAPTERS_FOR_USEFUL_NAV:
+            return level
+    return min(counts)
+
+
 def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
     """Split by detected document structure, not PDF pages (spec section 30).
 
     Uses the top-most heading level actually present as the chapter boundary:
     level 1 if any exist, else level 2, else the whole book is one chapter.
     """
-    heading_levels = {n.level for n in nodes if n.role == _HEADING_SPLIT_ROLE and n.level}
-    split_level = 1 if 1 in heading_levels else (2 if 2 in heading_levels else None)
+    split_level = _choose_split_level(nodes)
 
     chapters: list[Chapter] = []
     current: Chapter | None = None
@@ -71,7 +96,9 @@ def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
         # reachable from the table of contents, so it opens a chapter of its own
         # regardless of the heading level its typography implied.
         starts_chapter = node.role == BlockRole.ENDNOTE_SECTION_HEADING or (
-            split_level is not None and node.role == _HEADING_SPLIT_ROLE and node.level == split_level
+            split_level is not None
+            and node.role == _HEADING_SPLIT_ROLE
+            and (node.level or 99) <= split_level
         )
         if starts_chapter:
             if current is None and front_matter:

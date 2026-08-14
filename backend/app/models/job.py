@@ -69,6 +69,16 @@ class QualityReport:
     ocr_mean_confidence: float | None = None
     content_integrity_suspicious: bool = False
     content_integrity_notes: list[str] = field(default_factory=list)
+    # Structural quality, tracked separately from validity. An EPUB can pass
+    # EPUBCheck perfectly and still be a poor ebook, so these are never folded
+    # into a single pass/fail.
+    footnotes_linked: int = 0
+    endnotes_linked: int = 0
+    unmatched_marker_count: int = 0
+    navigation_entry_count: int = 0
+    structure_score: float = 0.0
+    needs_review: bool = False
+    review_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -99,6 +109,13 @@ class QualityReport:
             "ocr_mean_confidence": self.ocr_mean_confidence,
             "content_integrity_suspicious": self.content_integrity_suspicious,
             "content_integrity_notes": self.content_integrity_notes,
+            "footnotes_linked": self.footnotes_linked,
+            "endnotes_linked": self.endnotes_linked,
+            "unmatched_marker_count": self.unmatched_marker_count,
+            "navigation_entry_count": self.navigation_entry_count,
+            "structure_score": self.structure_score,
+            "needs_review": self.needs_review,
+            "review_reasons": self.review_reasons,
         }
 
 

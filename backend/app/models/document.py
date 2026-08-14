@@ -170,6 +170,12 @@ class StructuralNode:
     # Populated when this node was demoted to a preserved image region.
     fallback_reason: str | None = None
     alt_text: str | None = None
+    # For headings: size relative to body text, used to derive h1..h4 from the
+    # scales the document actually uses rather than absolute point sizes.
+    heading_scale: float | None = None
+    # Why a structural decision was made, so a low-confidence call stays
+    # explainable in the quality report instead of being silently accepted.
+    evidence: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -69,6 +69,36 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(report.contentIntegrityNotes.count, 1)
     }
 
+    func testDecodesStructuralQualityAndReviewState() throws {
+        // Captured from a real conversion of a scanned novel whose notes could
+        // only be partly linked.
+        let json = """
+        {
+          "title": "A Novel", "author": null, "page_count": 348, "chapter_count": 4,
+          "heading_count": 8, "paragraph_count": 3402, "footnote_count": 6,
+          "image_count": 133, "table_count": 0, "word_count_source": 97494,
+          "word_count_epub": 95209, "content_integrity_ratio": 0.977,
+          "epubcheck_passed": true, "epubcheck_errors": [], "epubcheck_warnings": [],
+          "ai_provider_used": "none", "ai_blocks_reviewed": 0, "quality_score": 86.9,
+          "footnotes_linked": 1, "endnotes_linked": 0, "unmatched_marker_count": 1,
+          "navigation_entry_count": 12, "structure_score": 79.2,
+          "needs_review": true,
+          "review_reasons": ["1 of 6 notes could be linked to a reference in the text"]
+        }
+        """.data(using: .utf8)!
+
+        let report = try JSONDecoder().decode(QualityReport.self, from: json)
+        XCTAssertEqual(report.footnotesLinked, 1)
+        XCTAssertEqual(report.footnoteCount, 6)
+        XCTAssertEqual(report.unmatchedMarkerCount, 1)
+        XCTAssertEqual(report.navigationEntryCount, 12)
+        XCTAssertEqual(report.structureScore, 79.2, accuracy: 0.01)
+        XCTAssertTrue(report.needsReview)
+        XCTAssertEqual(report.reviewReasons.count, 1)
+        // A valid EPUB can still need review; the two must stay independent.
+        XCTAssertTrue(report.epubcheckPassed)
+    }
+
     func testDecodesQualityReportFromAnOlderBackendWithoutNewFields() throws {
         // Forward compatibility: the app must not fail to decode a response
         // from a backend that predates the OCR/table/formula work.
@@ -88,6 +118,8 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(report.ocrPageCount, 0)
         XCTAssertNil(report.ocrMeanConfidence)
         XCTAssertFalse(report.contentIntegritySuspicious)
+        XCTAssertFalse(report.needsReview)
+        XCTAssertTrue(report.reviewReasons.isEmpty)
     }
 
     func testDecodesProgressPayload() throws {

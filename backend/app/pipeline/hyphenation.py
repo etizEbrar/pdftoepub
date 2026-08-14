@@ -1,8 +1,19 @@
 from __future__ import annotations
 
-_HYPHEN_CHARS = "-‐‑"  # ASCII hyphen + Unicode hyphen/non-breaking hyphen.
+# ASCII hyphen, Unicode hyphen, non-breaking hyphen, and SOFT HYPHEN (U+00AD).
+#
+# The soft hyphen matters more than it looks: typesetters use it to mark a
+# discretionary break, and scanners/OCR emit it at every justified line break.
+# A single real Turkish book carried 2,279 of them against 72 ASCII hyphens, so
+# omitting it left a visible artifact ("sonra\xadsında") on nearly every page.
+_HYPHEN_CHARS = "-‐‑­"
 # Deliberately excludes en dash (–) and em dash (—): those are never
 # line-wrap artifacts and must never be touched.
+
+# A soft hyphen is invisible, so it can also appear *inside* a line rather than
+# at its end. Anywhere other than a line break it carries no meaning for
+# reflowable text and would render as a stray character in some readers.
+SOFT_HYPHEN = "­"
 
 
 def join_lines_with_hyphenation_repair(lines: list[str]) -> str:
@@ -20,9 +31,9 @@ def join_lines_with_hyphenation_repair(lines: list[str]) -> str:
     """
     if not lines:
         return ""
-    result = lines[0]
+    result = lines[0].rstrip()
     for raw_next in lines[1:]:
-        next_line = raw_next.lstrip()
+        next_line = raw_next.strip()
         if not next_line:
             continue
         if (
@@ -38,4 +49,6 @@ def join_lines_with_hyphenation_repair(lines: list[str]) -> str:
         if result and not result.endswith((" ", "\n")):
             result += " "
         result += next_line
-    return result
+    # Any soft hyphen that survived was not at a line break, so it is a
+    # discretionary mark with no meaning once the text reflows.
+    return result.replace(SOFT_HYPHEN, "")

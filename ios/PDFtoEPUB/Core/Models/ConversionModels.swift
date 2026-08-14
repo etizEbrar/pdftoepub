@@ -145,6 +145,16 @@ struct QualityReport: Codable, Equatable {
     let contentIntegritySuspicious: Bool
     let contentIntegrityNotes: [String]
 
+    // Structural quality, reported separately from EPUB validity: a valid EPUB
+    // can still be a poor ebook, and the app must not present it as perfect.
+    let footnotesLinked: Int
+    let endnotesLinked: Int
+    let unmatchedMarkerCount: Int
+    let navigationEntryCount: Int
+    let structureScore: Double
+    let needsReview: Bool
+    let reviewReasons: [String]
+
     enum CodingKeys: String, CodingKey {
         case title, author
         case pageCount = "page_count"
@@ -172,6 +182,13 @@ struct QualityReport: Codable, Equatable {
         case ocrMeanConfidence = "ocr_mean_confidence"
         case contentIntegritySuspicious = "content_integrity_suspicious"
         case contentIntegrityNotes = "content_integrity_notes"
+        case footnotesLinked = "footnotes_linked"
+        case endnotesLinked = "endnotes_linked"
+        case unmatchedMarkerCount = "unmatched_marker_count"
+        case navigationEntryCount = "navigation_entry_count"
+        case structureScore = "structure_score"
+        case needsReview = "needs_review"
+        case reviewReasons = "review_reasons"
     }
 
 }
@@ -210,6 +227,13 @@ extension QualityReport {
             try c.decodeIfPresent(Bool.self, forKey: .contentIntegritySuspicious) ?? false
         contentIntegrityNotes =
             try c.decodeIfPresent([String].self, forKey: .contentIntegrityNotes) ?? []
+        footnotesLinked = try c.decodeIfPresent(Int.self, forKey: .footnotesLinked) ?? 0
+        endnotesLinked = try c.decodeIfPresent(Int.self, forKey: .endnotesLinked) ?? 0
+        unmatchedMarkerCount = try c.decodeIfPresent(Int.self, forKey: .unmatchedMarkerCount) ?? 0
+        navigationEntryCount = try c.decodeIfPresent(Int.self, forKey: .navigationEntryCount) ?? 0
+        structureScore = try c.decodeIfPresent(Double.self, forKey: .structureScore) ?? 0
+        needsReview = try c.decodeIfPresent(Bool.self, forKey: .needsReview) ?? false
+        reviewReasons = try c.decodeIfPresent([String].self, forKey: .reviewReasons) ?? []
     }
 }
 

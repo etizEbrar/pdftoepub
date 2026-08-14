@@ -138,8 +138,15 @@ def apply_formulas(
     """
     mathml_count = fallback_count = 0
 
+    # HEADING is included deliberately: a numbered display equation is centred,
+    # set larger than body text and isolated, so structural scoring reasonably
+    # reads it as a heading. The formula detector demands far more specific
+    # evidence (math symbols, an equation number, a math font), so letting it
+    # examine headings reclaims real equations without stealing real titles.
+    considered = {BlockRole.PARAGRAPH, BlockRole.HEADING}
+
     for node in nodes:
-        if node.role != BlockRole.PARAGRAPH or len(node.source_block_ids) != 1:
+        if node.role not in considered or len(node.source_block_ids) != 1:
             continue
         block = blocks_by_id.get(node.source_block_ids[0])
         if block is None:

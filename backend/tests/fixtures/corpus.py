@@ -521,6 +521,120 @@ def build_large_book(path: Path, pages: int = 520) -> Path:
     return path
 
 
+# --------------------------------------------------------------------------
+# M. Scanned novel carrying its own OCR text layer
+#
+# Reproduces the *structure* of a real 348-page Turkish paperback that exposed
+# several defects, using entirely invented prose. Characteristics that mattered:
+#   - a full-page background scan image on every page, plus a complete embedded
+#     text layer (so OCR must not re-read the book)
+#   - almost no typographic variation in body text
+#   - verso/recto alternating running heads
+#   - page numbers whose digits OCR splits with a space ("4 1")
+#   - soft hyphens (U+00AD) at justified line breaks
+#   - chapter numbers set on their own line above the chapter title
+#   - a handful of real footnotes, one with its marker welded to a word
+# --------------------------------------------------------------------------
+
+# Latin-only prose set in a built-in font: the structural properties under test
+# (soft hyphens, split page numbers, alternating heads, welded note markers) are
+# script-independent, and embedding a full Unicode face would add ~15MB to a
+# fixture the suite rebuilds on every run.
+_SCAN_BODY_SENTENCES = [
+    "In the first hours of morning the streets stood empty and the wind blew",
+    "softly past the windows stirring the curtains a little every time that",
+    "it passed. A door closed somewhere far away and then the silence came",
+    "back and settled in again. Nobody hurried at this hour and nobody spoke.",
+]
+
+
+def build_scanned_novel_with_text_layer(
+    path: Path, pages: int = 46, chapter_pages: tuple[int, ...] = (6, 22, 36)
+) -> Path:
+    """A scanned-looking novel that already carries a usable text layer."""
+    doc = fitz.open()
+
+    # Small flat pixmap scaled to the page: the structural signal that matters
+    # is full-page image coverage, not resolution, and a large raster would
+    # make this fixture tens of megabytes.
+    background = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 80, 112), False)
+    background.clear_with(246)
+    # Insert the same compressed PNG bytes on every page so the file stores one
+    # image object rather than 46 copies of a raw pixmap.
+    background_png = background.tobytes("png")
+    background_xref = 0
+
+    font = fitz.Font("helv")
+    chapter_titles = {chapter_pages[0]: "Kurban", chapter_pages[1]: "Ben", chapter_pages[2]: "Bir"}
+    note_pages = {12: "1", 28: "2"}
+
+    for index in range(pages):
+        page_no = index + 1
+        page = doc.new_page(width=396, height=561)
+        if index == 0:
+            page.insert_image(page.rect, stream=background_png)
+            background_xref = page.get_images(full=True)[0][0]
+        else:
+            # Reuse the already-embedded image rather than storing it again.
+            page.insert_image(page.rect, xref=background_xref)
+        writer = fitz.TextWriter(page.rect)
+
+        # Alternating running head: title on one side, author on the other.
+        # Chapter-opening pages carry no running head, as books conventionally
+        # set them — and as the book this reproduces does.
+        if page_no not in chapter_titles:
+            head = "Seyir" if page_no % 2 == 0 else "Author Name"
+            writer.append(fitz.Point(180, 20), head, font=font, fontsize=6.1)
+
+        if page_no in chapter_titles:
+            # Chapter number alone above the title, both in display type.
+            writer.append(fitz.Point(190, 46), str(chapter_pages.index(page_no) + 1),
+                          font=font, fontsize=28.9)
+            writer.append(fitz.Point(150, 100), chapter_titles[page_no], font=font, fontsize=28.9)
+            # Chapter epigraph, as in the book this reproduces: it is what keeps
+            # an opening page above the "essentially empty" threshold.
+            writer.append(
+                fitz.Point(96, 140),
+                "\"Everything is so because they are so . . .\"",
+                font=font,
+                fontsize=9.45,
+            )
+        else:
+            y = 48
+            for repeat in range(6):
+                for line_index, sentence in enumerate(_SCAN_BODY_SENTENCES):
+                    text = sentence
+                    # Soft hyphen at a justified break, as a scanner emits.
+                    if line_index == 1:
+                        text = text[:-3] + "­"
+                    writer.append(fitz.Point(28, y), text, font=font, fontsize=8.85)
+                    y += 14.5
+                y += 4
+                if y > 480:
+                    break
+
+            if page_no in note_pages:
+                marker = note_pages[page_no]
+                # Marker welded to the preceding word, the way OCR emits it.
+                writer.append(
+                    fitz.Point(28, y), f"This claim rests upon a documented source{marker}",
+                    font=font, fontsize=8.85,
+                )
+                writer.append(
+                    fitz.Point(28, 505), f"{marker} The source note appears here in smaller type.",
+                    font=font, fontsize=5.4,
+                )
+
+        # Page number with a space between digits, as OCR splits it.
+        spaced = " ".join(str(page_no)) if page_no >= 10 else str(page_no)
+        writer.append(fitz.Point(190, 543), spaced, font=font, fontsize=6.0)
+        writer.write_text(page)
+
+    doc.save(str(path), deflate=True, garbage=4)
+    doc.close()
+    return path
+
+
 BUILDERS = {
     "turkish_novel": build_turkish_novel,
     "two_column_academic": build_two_column_academic,

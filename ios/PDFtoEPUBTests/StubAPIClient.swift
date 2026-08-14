@@ -71,7 +71,10 @@ extension QualityReport {
         aiProviderUsed: String = "none",
         ocrPageCount: Int = 0,
         imageFallbackCount: Int = 0,
-        contentIntegritySuspicious: Bool = false
+        contentIntegritySuspicious: Bool = false,
+        footnotesLinked: Int = 12,
+        needsReview: Bool = false,
+        reviewReasons: [String] = []
     ) -> QualityReport {
         QualityReport(
             title: title,
@@ -100,7 +103,14 @@ extension QualityReport {
             ocrPageCount: ocrPageCount,
             ocrMeanConfidence: ocrPageCount > 0 ? 94.2 : nil,
             contentIntegritySuspicious: contentIntegritySuspicious,
-            contentIntegrityNotes: contentIntegritySuspicious ? ["2 source blocks did not reach the EPUB"] : []
+            contentIntegrityNotes: contentIntegritySuspicious ? ["2 source blocks did not reach the EPUB"] : [],
+            footnotesLinked: footnotesLinked,
+            endnotesLinked: 0,
+            unmatchedMarkerCount: 0,
+            navigationEntryCount: 32,
+            structureScore: needsReview ? 62.5 : 98.0,
+            needsReview: needsReview,
+            reviewReasons: reviewReasons
         )
     }
 }
