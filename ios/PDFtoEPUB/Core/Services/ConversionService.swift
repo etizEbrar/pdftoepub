@@ -26,29 +26,35 @@ actor ConversionService {
         while true {
             try Task.checkCancellation()
 
+            let progress: ConversionProgress
             do {
-                let progress = try await client.fetchProgress(id: id)
+                progress = try await client.fetchProgress(id: id)
                 consecutiveTransientFailures = 0
-                onProgress(progress)
-
-                if progress.status == .completed {
-                    return try await client.fetchResult(id: id)
-                }
-                if progress.status == .failed {
-                    let summary = try await client.fetchSummary(id: id)
-                    throw APIError.server(
-                        code: summary.errorCode ?? "conversion_failed",
-                        message: summary.errorMessage ?? "We couldn't convert this document."
-                    )
-                }
-            } catch let error as APIError where error.isRetryable && error != .cancelled {
+            } catch let error as APIError where error.isTransient {
                 // A dropped connection mid-job shouldn't lose the job: the work
                 // continues server-side, so keep polling for a while before
-                // surfacing the failure (spec section 41).
+                // surfacing the failure (spec section 41). Only transport
+                // failures land here — a job the backend reports as FAILED is
+                // terminal and is thrown below, outside this retry path.
                 consecutiveTransientFailures += 1
                 if consecutiveTransientFailures > Self.maxTransientFailures {
                     throw error
                 }
+                try await Task.sleep(for: .seconds(Self.pollIntervalSeconds))
+                continue
+            }
+
+            onProgress(progress)
+
+            if progress.status == .completed {
+                return try await client.fetchResult(id: id)
+            }
+            if progress.status == .failed {
+                let summary = try await client.fetchSummary(id: id)
+                throw APIError.server(
+                    code: summary.errorCode ?? "conversion_failed",
+                    message: summary.errorMessage ?? "We couldn't convert this document."
+                )
             }
 
             try await Task.sleep(for: .seconds(Self.pollIntervalSeconds))

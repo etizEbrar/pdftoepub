@@ -42,11 +42,14 @@ enum APIError: LocalizedError, Equatable {
         }
     }
 
-    var isRetryable: Bool {
+    /// Transport-level hiccups worth silently re-polling through, as opposed to
+    /// a definitive answer from the server. A job the backend reports as FAILED
+    /// is *not* transient — it is a final answer and must surface immediately.
+    var isTransient: Bool {
         switch self {
-        case .notConnected, .timedOut, .unexpectedStatus, .server:
+        case .notConnected, .timedOut, .unexpectedStatus:
             return true
-        case .invalidURL, .decoding, .fileTooLarge, .cancelled:
+        case .server, .invalidURL, .decoding, .fileTooLarge, .cancelled:
             return false
         }
     }

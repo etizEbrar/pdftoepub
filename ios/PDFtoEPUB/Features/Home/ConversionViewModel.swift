@@ -147,13 +147,27 @@ final class ConversionViewModel {
         }
     }
 
+    /// Backend error codes that describe something about *this PDF* can't be
+    /// fixed by trying the same file again — those offer "choose a different
+    /// PDF" instead. Transport problems and server-side hiccups do offer retry.
+    private static let nonRetryableCodes: Set<String> = [
+        "encrypted_pdf", "corrupted_pdf", "unsupported_pdf", "invalid_pdf",
+        "file_too_large", "unsupported_complexity", "invalid_url"
+    ]
+
     private static func failure(from error: APIError) -> ConversionFailure {
         let code: String
         if case .server(let serverCode, _) = error {
             code = serverCode
+        } else if case .invalidURL = error {
+            code = "invalid_url"
         } else {
             code = "network"
         }
-        return ConversionFailure(code: code, message: error.userMessage, isRetryable: error.isRetryable)
+        return ConversionFailure(
+            code: code,
+            message: error.userMessage,
+            isRetryable: !nonRetryableCodes.contains(code)
+        )
     }
 }

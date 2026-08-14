@@ -62,8 +62,13 @@ The app's Settings screen holds the backend address; it defaults to
 ## Tests
 
 ```bash
+# Backend: 43 tests
 cd backend && ./.venv/bin/pytest -q
-cd ios && xcodebuild -project PDFtoEPUB.xcodeproj -scheme PDFtoEPUB \
+
+# iOS: 10 unit + 5 UI tests
+cd ios
+./scripts/seed_simulator_fixture.sh    # puts the test PDF in the booted simulator
+xcodebuild -project PDFtoEPUB.xcodeproj -scheme PDFtoEPUB \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
@@ -71,10 +76,23 @@ Backend tests include a genuine end-to-end run: a synthetic PDF goes through the
 real pipeline and the resulting EPUB is validated by EPUBCheck, asserting zero
 errors with `AI_PROVIDER=none`.
 
+`ConversionFlowUITests` drives the whole journey through the **real** system
+document picker against a **live** backend, and asserts the result screen shows
+EPUB3 validation `Pass` and AI provider `None (fully local)`. It skips itself if
+the backend isn't running, so the suite stays green without it.
+`ScreenshotCaptureTest` attaches a screenshot of each stage to the test results.
+
 ## Current status
 
-Working end to end for native-text PDFs: import → analyze → convert with live
-progress → real quality report → QuickLook preview → share / Save to Files.
+Working end to end for native-text PDFs, verified in the simulator against the
+live backend: import → analyze → convert with live progress → real quality
+report → preview → share / Save to Files.
+
+One caveat worth knowing: **QuickLook does not render EPUB contents in the iOS
+Simulator** (it shows a file card with type and size instead), because the
+Simulator has no Apple Books. On a real device the preview renders, and "Share"
+→ Books is the primary reading path either way. Everything else above was
+exercised through the real UI, not mocked.
 
 Deliberately declined with a clear error rather than faked: scanned PDFs
 needing OCR, table and formula reconstruction, endnote sections, poetry-specific

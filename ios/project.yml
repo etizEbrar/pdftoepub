@@ -37,6 +37,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
           NSExceptionDomains:
@@ -49,6 +51,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.pdftoepub.app
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: true
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     dependencies: []
 
   PDFtoEPUBTests:
