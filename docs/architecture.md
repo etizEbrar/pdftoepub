@@ -1,23 +1,74 @@
 # PDF → EPUB — Architecture
 
-## 0. Scope of this build (vertical slice)
+## 0. Scope of this build
 
-This repository is being built incrementally. The first slice targets:
+- **Input**: native-text PDFs, scanned PDFs (local OCR), and mixed documents.
+- **Pipeline**: analysis → per-page routing (native / OCR / image fallback) →
+  geometry-aware extraction → reading order → table detection → verse detection →
+  paragraph reconstruction → hyphenation repair → header/footer stripping →
+  heading/structure detection → formula detection → footnote linking → endnote
+  linking → TOC → EPUB3 generation → EPUBCheck validation → content-integrity
+  accounting → quality report.
+- **AI**: fully optional, OFF by default. Every feature above — including OCR,
+  tables, formulas, endnotes, verse and RTL — runs with `AI_PROVIDER=none` and no
+  API key. A test hard-blocks all outbound sockets and converts six document
+  types through the real pipeline to prove it.
+- **iOS**: full user-facing flow (import → analyze → convert → live progress →
+  result → preview → share/save) against the real backend, with real error states.
 
-- **Input**: native-text PDFs (real text layer; scanned/OCR PDFs are recognized and
-  classified but routed to a not-yet-implemented path with a clear error, not faked).
-- **Pipeline**: analysis → geometry-aware extraction → reading order → paragraph
-  reconstruction → hyphenation repair → header/footer stripping → heading/structure
-  detection → TOC → footnote detection → image extraction → EPUB3 generation →
-  EPUBCheck validation → content-integrity check → quality report.
-- **AI**: fully optional, OFF by default. The entire pipeline above runs and produces
-  a valid, EPUBCheck-passing EPUB with `AI_PROVIDER=none` and no API key configured.
-- **iOS**: full user-facing flow (import → analyze → convert → live progress → result
-  → preview → share/save) against the real backend API below, with real error states.
+### Ordering constraints in the pipeline
 
-Deferred to later iterations (explicitly, not stubbed-and-hidden): OCR for scanned
-pages, table/formula reconstruction beyond image fallback, endnote cross-referencing,
-poetry/verse-specific handling, RTL, accounts, IAP.
+Several stages must run in a specific order; each was established by a real
+failure observed while running the fixture corpus:
+
+1. **Furniture detection before reference marking.** Marking footnote-reference
+   candidates rewrites block text with sentinel characters, which stops a bare
+   page number matching the page-number pattern and gets it misread as a note.
+2. **Tables before verse.** Table cells are short, ragged-right lines that look
+   exactly like poetry; consuming them first means verse only sees running text.
+3. **Verse before paragraph reconstruction.** Verse lines end without terminal
+   punctuation, so the paragraph merger would otherwise fuse a poem into one
+   prose paragraph and destroy the line breaks.
+4. **Footnotes before endnotes, then a finalize pass.** Footnote linking leaves
+   unmatched markers wrapped so endnote linking can still claim them; whatever
+   remains unmatched degrades to a plain superscript rather than a broken link.
+
+### Known limitations
+
+- **Bidi round-trip.** MuPDF returns RTL text in *visual* order; XHTML needs
+  *logical* order, so RTL runs are restored (`pipeline/bidi.py`). Pure RTL
+  paragraphs, RTL headings, Hebrew, and RTL containing a parenthesised Latin
+  citation round-trip exactly through a real PDF. Lines that heavily interleave
+  RTL with digits and long Latin runs keep every character, but a space or
+  terminal punctuation mark may land on the other side of a direction boundary —
+  inherent to inverting bidi without the original embedding levels.
+- **Formula coverage is deliberately narrow.** Only a single unambiguous
+  relation (`E = mc2`) becomes MathML. Fractions, integrals, matrices and nested
+  structure become a high-resolution image of the real equation, because wrong
+  mathematics is worse than a picture of the right mathematics.
+- **Table detection needs ruled or well-separated columns.** A table set with
+  neither ruling lines nor clear whitespace gutters may not be detected, and is
+  then emitted as ordinary paragraphs rather than as a wrong grid.
+- **OCR quality is Tesseract's.** Scans scoring below the confidence floor are
+  preserved as page images rather than converted to unreliable text.
+- Not implemented: accounts, IAP, PDF form fields, embedded media, and semantic
+  reconstruction of deeply nested or multi-level-header tables.
+
+## 0a. OCR routing and cost control
+
+Per-page classification (`pipeline/ocr/classify.py`) is the gate that keeps OCR
+cheap. A page with a usable text layer answers `NATIVE` and never invokes
+Tesseract; only `SCANNED` and `MIXED` pages pay for it. A 520-page native-text
+book therefore performs **zero** OCR passes and zero rasterization — asserted in
+`tests/integration/test_performance.py`.
+
+Rotation is handled by re-OCR, not by trusting orientation detection: Tesseract's
+own OSD cannot recover 180° pages (it returns confident-looking nonsense scoring
+in the mid-60s). The upright pass is accepted outright only above a separate
+"confident accept" threshold; otherwise each orientation is tried and the
+best-scoring result wins. That distinction matters — gating retries on the
+reliability floor alone would accept the nonsense and never try the orientation
+that reads correctly.
 
 ## 1. AI-optional architecture (hard requirement)
 

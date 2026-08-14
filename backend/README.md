@@ -12,6 +12,11 @@ off-by-default enhancement layer, never a requirement.
   on macOS — pulls in a JRE). The server still runs without it, but conversions
   will fail validation, matching the spec's "never present an unvalidated EPUB
   as successful" rule.
+- [Tesseract](https://github.com/tesseract-ocr/tesseract) on `PATH` for scanned
+  documents: `brew install tesseract tesseract-lang`. Without it, native-text
+  PDFs convert normally and scanned pages are preserved as images rather than
+  read. Language packs are selected automatically from the detected document
+  language; missing packs degrade to the ones installed instead of failing.
 
 No Docker, no Redis, no database server — job state lives in a local SQLite
 file under `backend/data/`, and the job queue is a small in-process asyncio
@@ -71,17 +76,30 @@ See `.env.example`. The only settings worth knowing:
   `AI_CONFIDENCE_THRESHOLD` (default 0.70) — never the whole book.
 - `MAX_UPLOAD_MB`, `JOB_TTL_HOURS` — upload limit and temp-file retention.
 
-## What this slice does and doesn't cover yet
+## Configuration for OCR and fallbacks
 
-Implemented for real (not stubbed): PDF classification, geometry-aware
-extraction, multi-column reading order, paragraph reconstruction with
-hyphenation repair, running header/footer + page-number stripping, heading
-hierarchy detection, list detection, footnote reference/body linking with
-back-navigation, image extraction with a cover heuristic, EPUB3 packaging,
-EPUBCheck validation, content-integrity scoring, and a real (not invented)
-quality score.
+Also in `.env.example`:
 
-Deliberately not yet implemented, and declined with a clear error rather than
-faked: OCR for scanned/mixed PDFs, table and formula reconstruction (would
-need an image-fallback path), endnote sections, poetry-specific line
-preservation, RTL layout.
+- `OCR_ENABLED` (default true), `OCR_LANGUAGES` (default `eng`), `OCR_DPI` (300).
+- `OCR_MIN_WORD_CONFIDENCE` (40) — words below this are dropped, never trusted.
+- `OCR_MIN_REGION_CONFIDENCE` (75) — below this a page is preserved as an image
+  rather than converted to unreliable text. The floor sits deliberately above the
+  mid-60s band where Tesseract returns confident-looking nonsense for upside-down
+  Latin text.
+- `OCR_CONFIDENT_ACCEPT_THRESHOLD` (88) — above this the upright pass is trusted
+  and rotated retries are skipped, which is what keeps normal scans to one pass.
+- `TABLE_MIN_CONFIDENCE` / `FORMULA_MIN_CONFIDENCE` (0.70) — below these, a
+  faithful image of the source region is emitted instead of a guessed structure.
+
+## What is implemented
+
+PDF classification and per-page OCR routing, geometry-aware extraction,
+multi-column reading order, paragraph reconstruction with hyphenation repair,
+running header/footer + page-number stripping, heading hierarchy, lists,
+footnotes and endnotes with back-navigation, geometric table detection, formula
+detection with MathML or image fallback, verse/poetry preservation, RTL and
+bidirectional text, a reusable region rasterizer, EPUB3 packaging, real
+EPUBCheck validation, per-source content-integrity accounting, and a quality
+score computed from actual metrics.
+
+Limitations are documented in [`../docs/architecture.md`](../docs/architecture.md) §0.

@@ -12,6 +12,7 @@ struct ConversionResultView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.loose) {
                 headerCard
+                integrityWarningCard
                 statsCard
                 validationCard
             }
@@ -81,6 +82,10 @@ struct ConversionResultView: View {
                 Divider()
                 statRow("Footnotes", value: "\(report.footnoteCount)")
             }
+            if report.endnoteCount > 0 {
+                Divider()
+                statRow("Endnotes", value: "\(report.endnoteCount)")
+            }
             if report.imageCount > 0 {
                 Divider()
                 statRow("Images", value: "\(report.imageCount)")
@@ -88,6 +93,14 @@ struct ConversionResultView: View {
             if report.tableCount > 0 {
                 Divider()
                 statRow("Tables", value: "\(report.tableCount)")
+            }
+            if report.formulaCount > 0 {
+                Divider()
+                statRow("Equations", value: "\(report.formulaCount)")
+            }
+            if report.verseCount > 0 {
+                Divider()
+                statRow("Verse passages", value: "\(report.verseCount)")
             }
             Divider()
             statRow("Words", value: "\(report.wordCountEpub)")
@@ -104,7 +117,27 @@ struct ConversionResultView: View {
                 valueColor: report.epubcheckPassed ? .green : .red
             )
             Divider()
-            statRow("Content integrity", value: percent(report.contentIntegrityRatio))
+            statRow(
+                "Content integrity",
+                value: percent(report.contentIntegrityRatio),
+                valueColor: report.contentIntegritySuspicious ? .orange : .secondary
+            )
+            if report.ocrPageCount > 0 {
+                Divider()
+                statRow("Pages read by OCR", value: "\(report.ocrPageCount)")
+                if let confidence = report.ocrMeanConfidence {
+                    Divider()
+                    statRow("OCR confidence", value: String(format: "%.0f%%", confidence))
+                }
+            }
+            if report.imageFallbackCount > 0 {
+                Divider()
+                statRow("Preserved as images", value: "\(report.imageFallbackCount)")
+            }
+            if report.rtlBlockCount > 0 {
+                Divider()
+                statRow("Right-to-left passages", value: "\(report.rtlBlockCount)")
+            }
             Divider()
             statRow("Quality score", value: String(format: "%.1f", report.qualityScore))
             Divider()
@@ -112,6 +145,32 @@ struct ConversionResultView: View {
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+    }
+
+    /// Surfaced rather than hidden: the spec requires that unexpected content
+    /// loss is flagged for review, never silently reported as a clean success.
+    @ViewBuilder
+    private var integrityWarningCard: some View {
+        if report.contentIntegritySuspicious {
+            VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
+                Label("Needs review", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text("Some of the source document may not have carried over. Your original PDF was not modified.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(report.contentIntegrityNotes.prefix(3), id: \.self) { note in
+                    Text("• \(note)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardBackground()
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private func percent(_ ratio: Double) -> String {

@@ -82,11 +82,32 @@ EPUB3 validation `Pass` and AI provider `None (fully local)`. It skips itself if
 the backend isn't running, so the suite stays green without it.
 `ScreenshotCaptureTest` attaches a screenshot of each stage to the test results.
 
+## What it handles
+
+| Document type | Behaviour |
+|---|---|
+| Native-text books | Deterministic extraction; no OCR, no rasterization |
+| Scanned books | Local Tesseract OCR with real per-word confidence; any rotation |
+| Mixed native + scanned | Only the scanned pages are OCR'd |
+| Two-column academic | Gutter detection; each column read in full before the next |
+| Footnotes | Superscript matching, stacked notes split, back-navigation |
+| Endnotes | Collected sections, chapter-scoped numbering, cross-file links |
+| Tables | Geometric detection → semantic `<table>`, or a faithful image |
+| Formulas | MathML only when unambiguous, otherwise a high-resolution image |
+| Poetry / verse | Line breaks and stanzas preserved, still reflowable |
+| RTL (Arabic, Hebrew, Persian) | Logical character order, `dir="rtl"`, RTL page progression |
+| Unreadable regions | Preserved as high-resolution images with real alt text |
+
+Every one of these works with **no AI API key and no network access** —
+`tests/integration/test_no_paid_ai_required.py` blocks all outbound sockets and
+converts six of these document types to prove it.
+
 ## Current status
 
-Working end to end for native-text PDFs, verified in the simulator against the
-live backend: import → analyze → convert with live progress → real quality
-report → preview → share / Save to Files.
+Working end to end, verified in the simulator against the live backend for both
+native-text and scanned PDFs: import → analyze → convert with live progress →
+real quality report (including OCR pages and confidence) → preview → share /
+Save to Files.
 
 One caveat worth knowing: **QuickLook does not render EPUB contents in the iOS
 Simulator** (it shows a file card with type and size instead), because the
@@ -94,7 +115,9 @@ Simulator has no Apple Books. On a real device the preview renders, and "Share"
 → Books is the primary reading path either way. Everything else above was
 exercised through the real UI, not mocked.
 
-Deliberately declined with a clear error rather than faked: scanned PDFs
-needing OCR, table and formula reconstruction, endnote sections, poetry-specific
-line preservation, RTL. See [`docs/architecture.md`](docs/architecture.md) §0
-for the full boundary of this slice.
+Known limitations are documented honestly in
+[`docs/architecture.md`](docs/architecture.md) §0 — chiefly that heavily mixed
+RTL/LTR lines can shift a space across a direction boundary, that MathML is
+produced only for unambiguous single relations, and that unruled tables without
+clear column gutters may go undetected (and are then left as paragraphs rather
+than emitted as a wrong grid).

@@ -68,7 +68,10 @@ extension QualityReport {
     static func stub(
         title: String = "Test Book",
         epubcheckPassed: Bool = true,
-        aiProviderUsed: String = "none"
+        aiProviderUsed: String = "none",
+        ocrPageCount: Int = 0,
+        imageFallbackCount: Int = 0,
+        contentIntegritySuspicious: Bool = false
     ) -> QualityReport {
         QualityReport(
             title: title,
@@ -88,7 +91,16 @@ extension QualityReport {
             epubcheckWarnings: [],
             aiProviderUsed: aiProviderUsed,
             aiBlocksReviewed: 0,
-            qualityScore: 98.5
+            qualityScore: 98.5,
+            endnoteCount: 0,
+            verseCount: 0,
+            formulaCount: 0,
+            imageFallbackCount: imageFallbackCount,
+            rtlBlockCount: 0,
+            ocrPageCount: ocrPageCount,
+            ocrMeanConfidence: ocrPageCount > 0 ? 94.2 : nil,
+            contentIntegritySuspicious: contentIntegritySuspicious,
+            contentIntegrityNotes: contentIntegritySuspicious ? ["2 source blocks did not reach the EPUB"] : []
         )
     }
 }

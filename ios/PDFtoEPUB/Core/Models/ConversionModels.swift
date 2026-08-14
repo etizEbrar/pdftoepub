@@ -133,6 +133,18 @@ struct QualityReport: Codable, Equatable {
     let aiBlocksReviewed: Int
     let qualityScore: Double
 
+    // Added alongside OCR/table/formula/endnote/verse/RTL support. Defaulted so
+    // the app still decodes a response from an older backend.
+    let endnoteCount: Int
+    let verseCount: Int
+    let formulaCount: Int
+    let imageFallbackCount: Int
+    let rtlBlockCount: Int
+    let ocrPageCount: Int
+    let ocrMeanConfidence: Double?
+    let contentIntegritySuspicious: Bool
+    let contentIntegrityNotes: [String]
+
     enum CodingKeys: String, CodingKey {
         case title, author
         case pageCount = "page_count"
@@ -151,6 +163,53 @@ struct QualityReport: Codable, Equatable {
         case aiProviderUsed = "ai_provider_used"
         case aiBlocksReviewed = "ai_blocks_reviewed"
         case qualityScore = "quality_score"
+        case endnoteCount = "endnote_count"
+        case verseCount = "verse_count"
+        case formulaCount = "formula_count"
+        case imageFallbackCount = "image_fallback_count"
+        case rtlBlockCount = "rtl_block_count"
+        case ocrPageCount = "ocr_page_count"
+        case ocrMeanConfidence = "ocr_mean_confidence"
+        case contentIntegritySuspicious = "content_integrity_suspicious"
+        case contentIntegrityNotes = "content_integrity_notes"
+    }
+
+}
+
+// Defined in an extension so the compiler still synthesises the memberwise
+// initializer, which tests use to build fixtures.
+extension QualityReport {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        pageCount = try c.decode(Int.self, forKey: .pageCount)
+        chapterCount = try c.decode(Int.self, forKey: .chapterCount)
+        headingCount = try c.decode(Int.self, forKey: .headingCount)
+        paragraphCount = try c.decode(Int.self, forKey: .paragraphCount)
+        footnoteCount = try c.decode(Int.self, forKey: .footnoteCount)
+        imageCount = try c.decode(Int.self, forKey: .imageCount)
+        tableCount = try c.decode(Int.self, forKey: .tableCount)
+        wordCountSource = try c.decode(Int.self, forKey: .wordCountSource)
+        wordCountEpub = try c.decode(Int.self, forKey: .wordCountEpub)
+        contentIntegrityRatio = try c.decode(Double.self, forKey: .contentIntegrityRatio)
+        epubcheckPassed = try c.decode(Bool.self, forKey: .epubcheckPassed)
+        epubcheckErrors = try c.decode([String].self, forKey: .epubcheckErrors)
+        epubcheckWarnings = try c.decode([String].self, forKey: .epubcheckWarnings)
+        aiProviderUsed = try c.decode(String.self, forKey: .aiProviderUsed)
+        aiBlocksReviewed = try c.decode(Int.self, forKey: .aiBlocksReviewed)
+        qualityScore = try c.decode(Double.self, forKey: .qualityScore)
+        endnoteCount = try c.decodeIfPresent(Int.self, forKey: .endnoteCount) ?? 0
+        verseCount = try c.decodeIfPresent(Int.self, forKey: .verseCount) ?? 0
+        formulaCount = try c.decodeIfPresent(Int.self, forKey: .formulaCount) ?? 0
+        imageFallbackCount = try c.decodeIfPresent(Int.self, forKey: .imageFallbackCount) ?? 0
+        rtlBlockCount = try c.decodeIfPresent(Int.self, forKey: .rtlBlockCount) ?? 0
+        ocrPageCount = try c.decodeIfPresent(Int.self, forKey: .ocrPageCount) ?? 0
+        ocrMeanConfidence = try c.decodeIfPresent(Double.self, forKey: .ocrMeanConfidence)
+        contentIntegritySuspicious =
+            try c.decodeIfPresent(Bool.self, forKey: .contentIntegritySuspicious) ?? false
+        contentIntegrityNotes =
+            try c.decodeIfPresent([String].self, forKey: .contentIntegrityNotes) ?? []
     }
 }
 
