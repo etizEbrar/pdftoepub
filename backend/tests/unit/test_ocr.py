@@ -5,7 +5,12 @@ import pytest
 
 from app.core.config import settings
 from app.models.document import PageTextKind
-from app.pipeline.ocr.classify import classify_document, classify_page, pages_needing_ocr
+from app.pipeline.ocr.classify import (
+    classify_document,
+    classify_page,
+    pages_needing_ocr,
+    typical_page_text_length,
+)
 from app.pipeline.ocr.engine import resolve_languages, tesseract_available
 from app.pipeline.ocr.page_ocr import ocr_page, rotate_pixmap, unrotate_bbox
 
@@ -84,6 +89,83 @@ def test_only_scanned_and_mixed_pages_are_routed_to_ocr(tmp_path: Path):
     assert kinds[2] == PageTextKind.SCANNED
     assert pages_needing_ocr(kinds) == [2]
     doc.close()
+
+
+# --- scanned book that already ships an OCR text layer --------------------
+
+def _scanned_with_text_layer_pdf(path: Path, pages: int = 12, chars_per_page: int = 1800) -> Path:
+    """The shape that caused a real 348-page book to be re-OCR'd end to end.
+
+    Publishers routinely distribute scanned books with a full-page background
+    image *and* a complete embedded OCR text layer. Judged on image coverage
+    alone every page looks like it needs OCR, when in fact none of them do.
+    """
+    doc = fitz.open()
+    background = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 1200, 1550), False)
+    background.clear_with(245)
+
+    word = "kelime "
+    body = (word * (chars_per_page // len(word)))
+    for index in range(pages):
+        page = doc.new_page(width=612, height=792)
+        page.insert_image(page.rect, pixmap=background)  # full-page scan image
+        if index == 0:
+            page.insert_text((72, 100), "Kapak", fontsize=11)  # sparse cover page
+        else:
+            page.insert_textbox(
+                fitz.Rect(60, 60, 552, 740), body, fontsize=9, fontname="helv"
+            )
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_page_with_a_complete_text_layer_is_native_despite_a_full_page_image(tmp_path: Path):
+    pdf = _scanned_with_text_layer_pdf(tmp_path / "scanned_text_layer.pdf")
+    doc = fitz.open(str(pdf))
+    kinds = classify_document(doc)
+    doc.close()
+
+    text_pages = [kinds[p] for p in range(2, len(kinds) + 1)]
+    assert all(k == PageTextKind.NATIVE for k in text_pages), (
+        f"pages with a full text layer must not be re-OCR'd: {text_pages}"
+    )
+
+
+def test_sparse_page_in_a_scanned_book_still_gets_ocr(tmp_path: Path):
+    """The cover carries almost no text, so it is still worth reading."""
+    pdf = _scanned_with_text_layer_pdf(tmp_path / "scanned_text_layer.pdf")
+    doc = fitz.open(str(pdf))
+    kinds = classify_document(doc)
+    doc.close()
+
+    assert kinds[1] in (PageTextKind.SCANNED, PageTextKind.MIXED)
+
+
+def test_overwhelming_majority_of_such_a_book_avoids_ocr(tmp_path: Path):
+    pdf = _scanned_with_text_layer_pdf(tmp_path / "scanned_text_layer.pdf", pages=20)
+    doc = fitz.open(str(pdf))
+    kinds = classify_document(doc)
+    doc.close()
+
+    needing = pages_needing_ocr(kinds)
+    assert len(needing) <= 2, f"expected almost no OCR, got {len(needing)} of {len(kinds)}"
+
+
+def test_typical_page_text_length_reflects_the_document_norm(tmp_path: Path):
+    pdf = _scanned_with_text_layer_pdf(tmp_path / "s.pdf", pages=10, chars_per_page=1800)
+    doc = fitz.open(str(pdf))
+    typical = typical_page_text_length(doc)
+    doc.close()
+    assert typical > 500, f"median page length looked wrong: {typical}"
+
+
+def test_genuinely_scanned_book_without_a_text_layer_still_gets_ocr(tmp_path: Path):
+    """The density rule must not suppress OCR where it is actually needed."""
+    doc = fitz.open(str(_make_scanned_pdf(tmp_path / "scan.pdf")))
+    kinds = classify_document(doc)
+    doc.close()
+    assert kinds[1] == PageTextKind.SCANNED
 
 
 # --- rotation geometry (pure functions, no Tesseract needed) --------------

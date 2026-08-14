@@ -52,8 +52,16 @@ async def create_conversion(
     upload_path.parent.mkdir(parents=True, exist_ok=True)
     upload_path.write_bytes(contents)
 
-    job = Job(job_id=job_id, source_filename=file.filename, mode=mode, upload_path=str(upload_path))
+    job = Job(
+        job_id=job_id,
+        source_filename=file.filename,
+        mode=mode,
+        upload_path=str(upload_path),
+        stage_detail="Queued",
+    )
     store.save_job(job)
+    # enqueue reports the job's queue position back onto the job, so a client
+    # can tell "waiting behind other work" apart from "nothing is happening".
     await job_queue.enqueue(job_id)
 
     return ConversionCreatedResponse(id=job.job_id, status=job.stage)

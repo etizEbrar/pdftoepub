@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
     job_ttl_hours: int = 24
     max_upload_mb: int = 200
+    # Conversions that run at once. Each already off-loads its CPU-bound work to
+    # a thread, so this bounds memory and CPU rather than concurrency of the API.
+    job_concurrency: int = 2
 
     # AI — off by default. A normal conversion must work with none of these set.
     ai_provider: str = "none"  # none | local | anthropic | openai | google
