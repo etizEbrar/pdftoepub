@@ -28,3 +28,7 @@ ios/**/.swiftpm/
 # Editors
 .vscode/
 .idea/
+
+# Generated test fixtures (rebuilt on demand by tests/fixtures/corpus.py)
+backend/tests/fixtures/corpus/
+backend/tests/fixtures/*.pdf

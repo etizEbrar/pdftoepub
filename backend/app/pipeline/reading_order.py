@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from app.models.document import Block
 
-_FULL_WIDTH_RATIO = 0.75
+# A block at least this fraction of the content width spans the columns rather
+# than sitting inside one. Centred titles and section headings in a two-column
+# paper are often only ~60% of the content width, so a stricter threshold would
+# treat them as column content and let them straddle — and thereby hide — the
+# gutter, collapsing the layout back to interleaved single-column order.
+_FULL_WIDTH_RATIO = 0.55
 _MIN_COLUMN_BLOCKS = 2
 _ROW_SNAP = 4.0  # px tolerance for "same visual row" in single-column mode
 

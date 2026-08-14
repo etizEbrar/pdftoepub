@@ -26,6 +26,52 @@ class BlockRole(str, Enum):
     IMAGE = "image"
     TABLE = "table"
     QUOTE = "quote"
+    ENDNOTE = "endnote"
+    ENDNOTE_SECTION_HEADING = "endnote_section_heading"
+    VERSE = "verse"
+    FORMULA = "formula"
+    # A source region preserved verbatim as an image because semantic
+    # reconstruction wasn't reliable enough to be safe.
+    IMAGE_FALLBACK = "image_fallback"
+
+
+class PageTextKind(str, Enum):
+    """How a single page's text should be obtained."""
+
+    NATIVE = "native"  # trustworthy embedded text layer
+    SCANNED = "scanned"  # no usable text layer; needs OCR
+    MIXED = "mixed"  # partial text layer plus large un-texted image regions
+    EMPTY = "empty"  # genuinely blank page
+
+
+class TextDirection(str, Enum):
+    LTR = "ltr"
+    RTL = "rtl"
+
+
+@dataclass
+class TableCell:
+    text: str
+    row: int
+    col: int
+    row_span: int = 1
+    col_span: int = 1
+    is_header: bool = False
+
+
+@dataclass
+class TableData:
+    """A geometrically reconstructed table. Rendered as semantic XHTML only when
+    `confidence` clears settings.table_min_confidence; otherwise the owning node
+    is converted to an IMAGE_FALLBACK preserving the original region."""
+
+    rows: int
+    cols: int
+    cells: list[TableCell] = field(default_factory=list)
+    has_header_row: bool = False
+    caption: str | None = None
+    confidence: float = 0.0
+    continues_from_previous_page: bool = False
 
 
 @dataclass
@@ -40,7 +86,11 @@ class Span:
     italic: bool
     baseline: float
     is_superscript: bool = False
+    is_subscript: bool = False
     line_break_after: bool = False
+    # OCR provenance: None for spans read from a real text layer, otherwise the
+    # mean Tesseract confidence (0-100) for the words making up this span.
+    ocr_confidence: float | None = None
 
 
 @dataclass
@@ -68,6 +118,10 @@ class Block:
     image_ref: str | None = None  # key into DocumentModel.images for kind == "image"
     column: int = 0
     order_key: float = 0.0
+    # Provenance so integrity accounting can distinguish native from OCR text.
+    source: str = "native"  # "native" | "ocr"
+    ocr_confidence: float | None = None
+    direction: TextDirection = TextDirection.LTR
 
     def geometry_dict(self) -> dict:
         """The canonical per-spec block/geometry record, text+geometry bound together."""
@@ -102,6 +156,20 @@ class StructuralNode:
     footnote_backrefs: list[str] = field(default_factory=list)  # for role == FOOTNOTE: ref anchor ids pointing here
     image_ref: str | None = None
     page: int | None = None
+    # Endnotes reuse the footnote machinery but keep their own identity so the
+    # two are never conflated (spec: "do not confuse footnotes and endnotes").
+    endnote_number: str | None = None
+    endnote_chapter: str | None = None
+    # Verse: the meaningful line breaks that must survive into the EPUB, plus
+    # per-line indent depth. Empty for every other role.
+    verse_lines: list[str] = field(default_factory=list)
+    verse_indents: list[int] = field(default_factory=list)
+    table: TableData | None = None
+    mathml: str | None = None
+    direction: TextDirection = TextDirection.LTR
+    # Populated when this node was demoted to a preserved image region.
+    fallback_reason: str | None = None
+    alt_text: str | None = None
 
 
 @dataclass
@@ -115,6 +183,10 @@ class PDFAnalysis:
     author_guess: str | None = None
     language_guess: str | None = None
     is_encrypted: bool = False
+    page_kinds: dict[int, PageTextKind] = field(default_factory=dict)  # 1-based page -> kind
+    direction: TextDirection = TextDirection.LTR
+    ocr_pages: list[int] = field(default_factory=list)
+    mean_ocr_confidence: float | None = None
 
 
 @dataclass

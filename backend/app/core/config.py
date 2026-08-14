@@ -26,6 +26,39 @@ class Settings(BaseSettings):
     ai_confidence_threshold: float = 0.70
     ai_no_ai_zone_threshold: float = 0.90
 
+    # OCR — local Tesseract only. No network, no API key, no per-page cost.
+    ocr_enabled: bool = True
+    tesseract_binary: str = "tesseract"
+    tessdata_prefix: str | None = None  # auto-detected when unset
+    ocr_languages: str = "eng"  # "+"-joined Tesseract codes, e.g. "eng+tur"
+    ocr_dpi: int = 300
+    # A page whose native text layer holds fewer characters than this is a
+    # candidate for OCR; see pipeline/ocr/classify.py for the full decision.
+    ocr_min_native_chars_per_page: int = 60
+    # Per-word Tesseract confidences below this are dropped rather than trusted.
+    ocr_min_word_confidence: float = 40.0
+    # A region whose mean OCR confidence falls below this is preserved as a
+    # high-resolution image instead of as (probably wrong) text.
+    #
+    # Measured against upside-down Latin text, Tesseract returns confident-looking
+    # nonsense in the mid-60s ("OUI] 1X9} JO" at 66.5), while genuinely readable
+    # text lands in the 90s. The floor sits above that garbage band deliberately:
+    # a page we can't read must become a faithful image, never invented words.
+    ocr_min_region_confidence: float = 75.0
+    # Above this, the upright pass is trusted outright and the rotated retries
+    # are skipped — that's what keeps OCR to a single pass on normal scans.
+    ocr_confident_accept_threshold: float = 88.0
+    ocr_detect_rotation: bool = True
+
+    # Image fallback rasterization
+    fallback_render_dpi: int = 200
+    fallback_max_pixels: int = 4_000_000  # caps memory on very large regions
+
+    # Structural reconstruction confidence floors. Below these, the pipeline
+    # prefers a faithful image fallback over a guessed semantic structure.
+    table_min_confidence: float = 0.70
+    formula_min_confidence: float = 0.70
+
     # EPUB validation
     epubcheck_binary: str = "epubcheck"
 

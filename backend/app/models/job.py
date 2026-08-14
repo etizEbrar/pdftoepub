@@ -60,6 +60,15 @@ class QualityReport:
     ai_provider_used: str = "none"
     ai_blocks_reviewed: int = 0
     quality_score: float = 0.0
+    endnote_count: int = 0
+    verse_count: int = 0
+    formula_count: int = 0
+    image_fallback_count: int = 0
+    rtl_block_count: int = 0
+    ocr_page_count: int = 0
+    ocr_mean_confidence: float | None = None
+    content_integrity_suspicious: bool = False
+    content_integrity_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +90,15 @@ class QualityReport:
             "ai_provider_used": self.ai_provider_used,
             "ai_blocks_reviewed": self.ai_blocks_reviewed,
             "quality_score": self.quality_score,
+            "endnote_count": self.endnote_count,
+            "verse_count": self.verse_count,
+            "formula_count": self.formula_count,
+            "image_fallback_count": self.image_fallback_count,
+            "rtl_block_count": self.rtl_block_count,
+            "ocr_page_count": self.ocr_page_count,
+            "ocr_mean_confidence": self.ocr_mean_confidence,
+            "content_integrity_suspicious": self.content_integrity_suspicious,
+            "content_integrity_notes": self.content_integrity_notes,
         }
 
 

@@ -7,6 +7,10 @@ from app.models.document import Block, BlockRole
 
 _DIGITS_RE = re.compile(r"\d+")
 _PAGE_NUMBER_RE = re.compile(r"^[\-–—\s]*\d{1,4}[\-–—\s]*$")
+# A note body opens with its marker and then real prose. Running footers never
+# look like this, so the pattern reliably separates the two.
+_NOTE_BODY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S+")
+_MIN_NOTE_BODY_WORDS = 3
 _TOP_BAND = 0.12
 _BOTTOM_BAND = 0.90
 _MIN_PAGES_FOR_REPETITION = 3
@@ -15,6 +19,14 @@ _REPETITION_RATIO = 0.6
 
 def _normalize(text: str) -> str:
     return _DIGITS_RE.sub("#", " ".join(text.split())).strip().lower()
+
+
+def _looks_like_note_body(text: str) -> bool:
+    """True for "1 Some explanatory sentence." — a note, not page furniture."""
+    stripped = text.strip()
+    if not _NOTE_BODY_RE.match(stripped):
+        return False
+    return len(stripped.split()) >= _MIN_NOTE_BODY_WORDS
 
 
 def _band(block: Block) -> str | None:
@@ -49,6 +61,13 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
 
             if _PAGE_NUMBER_RE.match(b.text.strip()):
                 furniture[b.block_id] = BlockRole.PAGE_NUMBER
+                continue
+
+            if _looks_like_note_body(b.text):
+                # Footnote bodies live in the bottom margin band and can repeat
+                # across pages ("Ibid.", a recurring source). Stripping them as
+                # a running footer would silently delete real content, so they
+                # are never eligible for furniture removal.
                 continue
 
             key = (_normalize(b.text), band)

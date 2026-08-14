@@ -39,13 +39,21 @@ def test_corrupted_pdf_fails_cleanly(tmp_path: Path):
     assert job.error_code in ("corrupted_pdf", "unsupported_pdf")
 
 
-def test_scanned_pdf_is_declined_not_silently_converted(tmp_path: Path):
+def test_blank_scanned_page_is_preserved_as_an_image_not_invented(tmp_path: Path):
+    """A scan with no readable text must never yield empty or invented prose.
+
+    `build_scanned_pdf` produces a blank raster page, so OCR legitimately finds
+    nothing. The page is preserved as an image and the conversion still
+    succeeds — the source is represented faithfully rather than fabricated.
+    """
     pdf_path = build_scanned_pdf(tmp_path / "scanned.pdf")
     job = _run_job("test-scanned", pdf_path)
-    assert job.stage == JobStage.FAILED
-    assert job.error_code == "unsupported_complexity"
-    # never a silently-empty "success"
-    assert job.quality_report is None
+
+    assert job.stage == JobStage.COMPLETED, f"{job.error_code}: {job.error_message}"
+    assert job.quality_report is not None
+    assert job.quality_report.image_fallback_count >= 1
+    assert job.quality_report.word_count_epub == 0  # nothing was invented
+    assert job.quality_report.epubcheck_passed is True
 
 
 def test_conversion_errors_carry_a_stable_code_and_safe_message():

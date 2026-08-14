@@ -7,6 +7,9 @@ from app.models.document import Block, BlockRole, StructuralNode
 
 BULLET_RE = re.compile(r"^[•●○◦▪‣–\-\*]\s+")
 NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
+# A note body opens with its marker; unlike NUMBERED_RE the separator is
+# optional, since footnotes are commonly set as "1 Text" with no punctuation.
+NOTE_ENTRY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S")
 TERMINAL_PUNCT = ".!?\"”’:;»)]"
 
 
@@ -170,6 +173,24 @@ def classify_blocks(
             role = BlockRole.QUOTE
             confidence = 0.7
         elif b.font_size and body_size and b.font_size < body_size * 0.85 and b.bbox[1] > b.page_height * 0.75:
+            # Several notes stacked in the footnote area are usually merged into
+            # one block. When every line opens with its own marker they are
+            # distinct notes, and must be split or they'd all link to whichever
+            # marker happened to come first.
+            raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            if len(raw_lines) > 1 and all(NOTE_ENTRY_RE.match(ln) for ln in raw_lines):
+                for li, line in enumerate(raw_lines):
+                    nodes.append(
+                        StructuralNode(
+                            node_id=f"n_{b.block_id}_{li}",
+                            role=BlockRole.FOOTNOTE,
+                            text=line,
+                            confidence=0.7,
+                            source_block_ids=[b.block_id],
+                            page=b.page,
+                        )
+                    )
+                continue
             role = BlockRole.FOOTNOTE
             confidence = 0.6  # refined by footnotes.py, which owns final footnote linking
 

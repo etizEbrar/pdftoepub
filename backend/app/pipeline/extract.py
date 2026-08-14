@@ -5,6 +5,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 from app.models.document import Block, Span
+from app.pipeline.bidi import visual_to_logical
 
 # PyMuPDF span flag bitmasks (see PyMuPDF docs on TextPage.extractDICT).
 _FLAG_SUPERSCRIPT = 1
@@ -37,13 +38,15 @@ def extract_page_blocks(page: fitz.Page, page_index: int) -> list[Block]:
         all_spans: list[Span] = []
         block_bbox = raw_block.get("bbox", (0, 0, 0, 0))
 
-        for li, raw_line in enumerate(raw_block.get("lines", [])):
-            line_id = f"p{page_num}_l{bi:03d}{li:03d}"
+        for raw_line in raw_block.get("lines", []):
             line_parts: list[str] = []
             for raw_span in raw_line.get("spans", []):
                 text = raw_span.get("text", "")
                 if text == "":
                     continue
+                # MuPDF hands back right-to-left scripts in visual order;
+                # XHTML needs logical order. See bidi.visual_to_logical.
+                text = visual_to_logical(text)
                 font_name = raw_span.get("font", "")
                 flags = raw_span.get("flags", 0)
                 origin = raw_span.get("origin", (0.0, 0.0))
@@ -58,7 +61,7 @@ def extract_page_blocks(page: fitz.Page, page_index: int) -> list[Block]:
                     is_superscript=bool(flags & _FLAG_SUPERSCRIPT),
                 )
                 all_spans.append(span)
-                line_parts.append(text)
+                line_parts.append(span.text)
             if line_parts:
                 lines_text.append("".join(line_parts).rstrip())
                 all_spans[-1].line_break_after = True

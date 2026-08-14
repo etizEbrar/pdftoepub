@@ -13,7 +13,7 @@ MARKER_OPEN = ""
 MARKER_CLOSE = ""
 
 _MARKER_TEXT_RE = re.compile(r"^[\d*†‡§¶#]{1,3}$")
-_MARKER_SCAN_RE = re.compile(f"{MARKER_OPEN}(.*?){MARKER_CLOSE}")
+MARKER_SCAN_RE = re.compile(f"{MARKER_OPEN}(.*?){MARKER_CLOSE}")
 _FOOTNOTE_PREFIX_RE = re.compile(r"^\s*([\d*†‡§¶#]{1,3})[.\)]?\s+(.*)$", re.DOTALL)
 
 _SUPERSCRIPT_SIZE_RATIO = 0.75
@@ -47,7 +47,14 @@ def mark_reference_candidates(blocks: list[Block], body_size: float) -> None:
         block.text = "".join(pieces).strip("\n")
 
 
-_MULTILINE_ROLES = {BlockRole.FOOTNOTE, BlockRole.QUOTE, BlockRole.LIST_ITEM, BlockRole.HEADING}
+_MULTILINE_ROLES = {
+    BlockRole.FOOTNOTE,
+    BlockRole.ENDNOTE,
+    BlockRole.QUOTE,
+    BlockRole.LIST_ITEM,
+    BlockRole.HEADING,
+    BlockRole.CAPTION,
+}
 
 
 def _flatten_remaining_multiline_text(nodes: list[StructuralNode]) -> None:
@@ -60,7 +67,9 @@ def _flatten_remaining_multiline_text(nodes: list[StructuralNode]) -> None:
             node.text = join_lines_with_hyphenation_repair(node.text.split("\n"))
 
 
-def link_references(nodes: list[StructuralNode]) -> tuple[list[StructuralNode], int]:
+def link_references(
+    nodes: list[StructuralNode], leave_unmatched: bool = False
+) -> tuple[list[StructuralNode], int]:
     """Match sentinel-wrapped reference markers in body text to FOOTNOTE-role
     nodes on the same (or immediately following) page, per spec sections 18-19.
 
@@ -68,6 +77,11 @@ def link_references(nodes: list[StructuralNode]) -> tuple[list[StructuralNode], 
     off into `footnote_number`; content nodes get their sentinels replaced with
     `{{NOTEREF:<footnote_node_id>:<ref_id>}}` placeholders for the EPUB builder)
     and the count of successfully linked references.
+
+    `leave_unmatched=True` keeps unresolved markers wrapped in their sentinels
+    so a later pass — endnote linking — still gets a chance to claim them. The
+    orchestrator uses that; callers who run footnote linking alone keep the
+    default and get plain superscripts immediately.
     """
     footnotes_by_page: dict[int, dict[str, StructuralNode]] = {}
     for node in nodes:
@@ -100,6 +114,8 @@ def link_references(nodes: list[StructuralNode]) -> tuple[list[StructuralNode], 
                 if target:
                     break
             if target is None:
+                if leave_unmatched:
+                    return match.group(0)  # keep the sentinel for endnote linking
                 # No matching footnote body found — render as plain superscript
                 # text rather than a broken link (zero-hallucination fallback).
                 return f"{{{{SUP:{marker}}}}}"
@@ -110,7 +126,32 @@ def link_references(nodes: list[StructuralNode]) -> tuple[list[StructuralNode], 
             linked += 1
             return f"{{{{NOTEREF:{target.node_id}:{ref_id}:{marker}}}}}"
 
-        node.text = _MARKER_SCAN_RE.sub(_replace, node.text)
+        node.text = MARKER_SCAN_RE.sub(_replace, node.text)
+
+    if not leave_unmatched:
+        _flatten_remaining_multiline_text(nodes)
+    return nodes, linked
+
+
+def finalize_unmatched_markers(nodes: list[StructuralNode]) -> int:
+    """Turn any reference markers still unclaimed after footnote *and* endnote
+    linking into plain superscripts, then repair multi-line text.
+
+    This is the zero-hallucination endpoint: a marker whose note we never found
+    is shown as it appeared in the source rather than linked to a guess.
+    """
+    unmatched = 0
+
+    def _replace(match: re.Match) -> str:
+        nonlocal unmatched
+        unmatched += 1
+        return f"{{{{SUP:{match.group(1)}}}}}"
+
+    for node in nodes:
+        if MARKER_OPEN in node.text:
+            node.text = MARKER_SCAN_RE.sub(_replace, node.text)
+        if node.verse_lines:
+            node.verse_lines = [MARKER_SCAN_RE.sub(_replace, line) for line in node.verse_lines]
 
     _flatten_remaining_multiline_text(nodes)
-    return nodes, linked
+    return unmatched
