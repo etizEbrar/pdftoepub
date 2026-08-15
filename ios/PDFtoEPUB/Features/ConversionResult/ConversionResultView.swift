@@ -158,6 +158,20 @@ struct ConversionResultView: View {
                 Divider()
                 statRow("Right-to-left passages", value: "\(report.rtlBlockCount)")
             }
+            if report.textCorrections > 0 {
+                Divider()
+                statRow("Text corrections", value: "\(report.textCorrections)")
+            }
+            if report.suspiciousPassages > 0 {
+                Divider()
+                // Detected but deliberately not altered — shown so the reader
+                // knows where the scan is doubtful rather than being told all is well.
+                statRow(
+                    "Passages left as found",
+                    value: "\(report.suspiciousPassages)",
+                    valueColor: .orange
+                )
+            }
             Divider()
             statRow("Quality score", value: String(format: "%.1f", report.qualityScore))
             Divider()

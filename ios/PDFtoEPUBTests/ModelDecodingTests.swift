@@ -99,6 +99,33 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(report.epubcheckPassed)
     }
 
+    func testDecodesTextRepairMetrics() throws {
+        let json = """
+        {
+          "title": "A Novel", "author": null, "page_count": 348, "chapter_count": 4,
+          "heading_count": 8, "paragraph_count": 3400, "footnote_count": 6,
+          "image_count": 133, "table_count": 0, "word_count_source": 97405,
+          "word_count_epub": 95120, "content_integrity_ratio": 0.9765,
+          "epubcheck_passed": true, "epubcheck_errors": [], "epubcheck_warnings": [],
+          "ai_provider_used": "none", "ai_blocks_reviewed": 0, "quality_score": 86.9,
+          "text_corrections": 23, "text_corrections_rejected": 348,
+          "text_correction_confidence": 0.863, "suspicious_passages": 114,
+          "pages_needing_text_review": 216, "needs_review": true,
+          "review_reasons": ["114 passages look like scanning artefacts"]
+        }
+        """.data(using: .utf8)!
+
+        let report = try JSONDecoder().decode(QualityReport.self, from: json)
+        XCTAssertEqual(report.textCorrections, 23)
+        XCTAssertEqual(report.textCorrectionsRejected, 348)
+        XCTAssertEqual(report.suspiciousPassages, 114)
+        XCTAssertEqual(report.pagesNeedingTextReview, 216)
+        XCTAssertEqual(report.textCorrectionConfidence, 0.863, accuracy: 0.001)
+        // Corrections applied and corrections withheld are reported separately,
+        // so a clean EPUB never implies the scan was clean.
+        XCTAssertTrue(report.needsReview)
+    }
+
     func testDecodesQualityReportFromAnOlderBackendWithoutNewFields() throws {
         // Forward compatibility: the app must not fail to decode a response
         // from a backend that predates the OCR/table/formula work.
@@ -120,6 +147,8 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(report.contentIntegritySuspicious)
         XCTAssertFalse(report.needsReview)
         XCTAssertTrue(report.reviewReasons.isEmpty)
+        XCTAssertEqual(report.textCorrections, 0)
+        XCTAssertEqual(report.suspiciousPassages, 0)
     }
 
     func testDecodesProgressPayload() throws {

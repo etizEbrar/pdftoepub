@@ -110,7 +110,12 @@ extension QualityReport {
             navigationEntryCount: 32,
             structureScore: needsReview ? 62.5 : 98.0,
             needsReview: needsReview,
-            reviewReasons: reviewReasons
+            reviewReasons: reviewReasons,
+            textCorrections: 23,
+            textCorrectionsRejected: 348,
+            textCorrectionConfidence: 0.86,
+            suspiciousPassages: 114,
+            pagesNeedingTextReview: 216
         )
     }
 }

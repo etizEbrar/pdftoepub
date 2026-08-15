@@ -23,6 +23,7 @@ from app.pipeline import (
     reading_order,
     structure,
     tables as tables_module,
+    textrepair,
     verse as verse_module,
 )
 from app.pipeline import images as images_pipeline
@@ -268,6 +269,23 @@ def _execute_pipeline(job: Job) -> None:
         note_numbers = footnotes.collect_note_numbers_by_page(content_blocks, body_size)
         footnotes.mark_reference_candidates(content_blocks, body_size, note_numbers)
 
+        # Repair extraction/OCR defects. Must run *after* reference marking,
+        # which rebuilds block text from spans and would otherwise discard the
+        # corrections; and before structure reading, so every later stage sees
+        # the repaired text. Local, deterministic, validated against the
+        # document's own vocabulary.
+        _update(job, detail="Checking text quality")
+        repair_report = textrepair.repair_blocks(
+            content_blocks, enabled=settings.text_repair_enabled
+        )
+        if repair_report.applied_count:
+            logger.info(
+                "job %s: applied %d text corrections, deferred %d as uncertain",
+                job.job_id,
+                repair_report.applied_count,
+                repair_report.rejected_count,
+            )
+
         nodes = structure.classify_blocks(ordered_blocks, furniture)
 
         blocks_by_id = {b.block_id: b for b in all_blocks}
@@ -345,7 +363,13 @@ def _execute_pipeline(job: Job) -> None:
         _update(job, stage=JobStage.QUALITY_CHECK, detail="Computing quality report")
         integrity = compute_integrity(document, build_result.word_count)
         quality = compute_quality_report(
-            document, build_result, integrity, validation, provider.name, reviewed_count
+            document,
+            build_result,
+            integrity,
+            validation,
+            provider.name,
+            reviewed_count,
+            repair_report,
         )
 
         job.epub_path = str(epub_path)

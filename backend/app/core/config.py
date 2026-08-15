@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     table_min_confidence: float = 0.70
     formula_min_confidence: float = 0.70
 
+    # Local text repair of extraction/OCR defects. No network, no API key.
+    text_repair_enabled: bool = True
+
     # EPUB validation
     epubcheck_binary: str = "epubcheck"
 

@@ -155,6 +155,13 @@ struct QualityReport: Codable, Equatable {
     let needsReview: Bool
     let reviewReasons: [String]
 
+    // Local text repair of extraction/OCR defects.
+    let textCorrections: Int
+    let textCorrectionsRejected: Int
+    let textCorrectionConfidence: Double
+    let suspiciousPassages: Int
+    let pagesNeedingTextReview: Int
+
     enum CodingKeys: String, CodingKey {
         case title, author
         case pageCount = "page_count"
@@ -189,6 +196,11 @@ struct QualityReport: Codable, Equatable {
         case structureScore = "structure_score"
         case needsReview = "needs_review"
         case reviewReasons = "review_reasons"
+        case textCorrections = "text_corrections"
+        case textCorrectionsRejected = "text_corrections_rejected"
+        case textCorrectionConfidence = "text_correction_confidence"
+        case suspiciousPassages = "suspicious_passages"
+        case pagesNeedingTextReview = "pages_needing_text_review"
     }
 
 }
@@ -234,6 +246,11 @@ extension QualityReport {
         structureScore = try c.decodeIfPresent(Double.self, forKey: .structureScore) ?? 0
         needsReview = try c.decodeIfPresent(Bool.self, forKey: .needsReview) ?? false
         reviewReasons = try c.decodeIfPresent([String].self, forKey: .reviewReasons) ?? []
+        textCorrections = try c.decodeIfPresent(Int.self, forKey: .textCorrections) ?? 0
+        textCorrectionsRejected = try c.decodeIfPresent(Int.self, forKey: .textCorrectionsRejected) ?? 0
+        textCorrectionConfidence = try c.decodeIfPresent(Double.self, forKey: .textCorrectionConfidence) ?? 1
+        suspiciousPassages = try c.decodeIfPresent(Int.self, forKey: .suspiciousPassages) ?? 0
+        pagesNeedingTextReview = try c.decodeIfPresent(Int.self, forKey: .pagesNeedingTextReview) ?? 0
     }
 }
 

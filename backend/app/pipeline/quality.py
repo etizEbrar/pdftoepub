@@ -4,6 +4,7 @@ from app.models.document import BlockRole, DocumentModel
 from app.models.job import QualityReport
 from app.pipeline.epub.builder import BuildResult
 from app.pipeline.integrity import IntegrityResult
+from app.pipeline.textrepair import CorrectionKind, RepairReport
 from app.pipeline.validate import ValidationResult
 
 
@@ -95,6 +96,7 @@ def compute_quality_report(
     validation: ValidationResult,
     ai_provider_used: str,
     ai_blocks_reviewed: int,
+    repair: RepairReport | None = None,
 ) -> QualityReport:
     """A real score from real metrics — never an invented number (spec section 38)."""
     total_notes = build.footnote_count + build.endnote_count
@@ -143,6 +145,20 @@ def compute_quality_report(
 
     structure_score, review_reasons = assess_structure(document, build, integrity, validation)
 
+    repair = repair or RepairReport()
+    suspicious = sum(
+        1 for c in repair.rejected if c.kind is CorrectionKind.SUSPICIOUS
+    )
+    if suspicious:
+        review_reasons.append(
+            f"{suspicious} passage(s) look like scanning artefacts and were left exactly as found"
+        )
+    if repair.rejected_count - suspicious:
+        review_reasons.append(
+            f"{repair.rejected_count - suspicious} possible text correction(s) were not applied "
+            "because the evidence was ambiguous"
+        )
+
     return QualityReport(
         title=document.metadata.get("title"),
         author=document.metadata.get("author"),
@@ -167,6 +183,12 @@ def compute_quality_report(
         unmatched_marker_count=build.unmatched_marker_count,
         navigation_entry_count=build.chapter_count + build.heading_count,
         structure_score=structure_score,
+        text_corrections=repair.applied_count,
+        text_corrections_by_kind=repair.counts_by_kind(),
+        text_corrections_rejected=repair.rejected_count,
+        text_correction_confidence=round(repair.mean_confidence, 3),
+        suspicious_passages=suspicious,
+        pages_needing_text_review=len(repair.pages_needing_review()),
         needs_review=bool(review_reasons),
         review_reasons=review_reasons,
         endnote_count=build.endnote_count,

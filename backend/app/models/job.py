@@ -77,6 +77,13 @@ class QualityReport:
     unmatched_marker_count: int = 0
     navigation_entry_count: int = 0
     structure_score: float = 0.0
+    # Local text repair of extraction/OCR defects.
+    text_corrections: int = 0
+    text_corrections_by_kind: dict[str, int] = field(default_factory=dict)
+    text_corrections_rejected: int = 0
+    text_correction_confidence: float = 1.0
+    suspicious_passages: int = 0
+    pages_needing_text_review: int = 0
     needs_review: bool = False
     review_reasons: list[str] = field(default_factory=list)
 
@@ -114,6 +121,12 @@ class QualityReport:
             "unmatched_marker_count": self.unmatched_marker_count,
             "navigation_entry_count": self.navigation_entry_count,
             "structure_score": self.structure_score,
+            "text_corrections": self.text_corrections,
+            "text_corrections_by_kind": self.text_corrections_by_kind,
+            "text_corrections_rejected": self.text_corrections_rejected,
+            "text_correction_confidence": self.text_correction_confidence,
+            "suspicious_passages": self.suspicious_passages,
+            "pages_needing_text_review": self.pages_needing_text_review,
             "needs_review": self.needs_review,
             "review_reasons": self.review_reasons,
         }
