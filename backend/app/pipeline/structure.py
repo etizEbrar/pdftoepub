@@ -13,6 +13,33 @@ NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
 NOTE_ENTRY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S")
 TERMINAL_PUNCT = ".!?\"”’:;»)]"
 
+# Characters books use to draw a scene divider. A centred line made only of
+# these is a thematic break, not prose — and OCR renders the same divider
+# differently on every page ("........", "• • • • •", ".. . • .."), which is
+# what made these look like stray ellipsis junk in the EPUB.
+_ORNAMENT_CHARS = set(".•*—–~§¤°◆◇■□▪▫★☆·⋅∙‧∗+×#")
+_MIN_ORNAMENT_MARKS = 3
+_MAX_ORNAMENT_CHARS = 24
+_ORNAMENT_CENTRE_TOLERANCE = 0.08  # fraction of page width
+
+
+def _looks_like_thematic_break(block: Block) -> bool:
+    """A short, centred line containing nothing but ornament characters.
+
+    Requires the *whole* block to be ornaments, so a genuine ellipsis inside a
+    sentence ("Keşke . . .") is never mistaken for a divider.
+    """
+    text = " ".join(block.text.split())
+    if not text or len(text) > _MAX_ORNAMENT_CHARS:
+        return False
+    marks = [c for c in text if not c.isspace()]
+    if len(marks) < _MIN_ORNAMENT_MARKS:
+        return False
+    if any(c not in _ORNAMENT_CHARS for c in marks):
+        return False
+    centre = (block.bbox[0] + block.bbox[2]) / 2
+    return abs(centre - block.page_width / 2) <= block.page_width * _ORNAMENT_CENTRE_TOLERANCE
+
 
 def body_font_size(blocks: list[Block]) -> float:
     sizes: list[float] = []
@@ -167,6 +194,20 @@ def classify_blocks(
         level = None
         confidence = 0.85
         evidence: list[str] = []
+
+        if _looks_like_thematic_break(b):
+            nodes.append(
+                StructuralNode(
+                    node_id=f"n_{b.block_id}",
+                    role=BlockRole.THEMATIC_BREAK,
+                    text=text,
+                    confidence=0.9,
+                    source_block_ids=[b.block_id],
+                    page=b.page,
+                    evidence=["centred-ornament-row"],
+                )
+            )
+            continue
 
         # Multi-signal heading scoring (see pipeline/headings.py). Typography
         # alone is useless on a scanned book re-set from an OCR layer, where

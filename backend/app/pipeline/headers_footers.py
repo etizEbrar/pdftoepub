@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 
 from app.models.document import Block, BlockRole
 
@@ -68,6 +69,50 @@ def _median_font_size(blocks_by_page: dict[int, list[Block]]) -> float:
     return sizes[len(sizes) // 2]
 
 
+# A page number sits at the same place on every page and is set in the same
+# small type. Once several are confirmed by their digits, that position and
+# size identify the rest — including ones OCR mangled into letters ("51" -> "s ı").
+_MIN_CONFIRMED_FOR_PROFILE = 5
+_PROFILE_Y_TOLERANCE = 0.02  # fraction of page height
+_PROFILE_SIZE_TOLERANCE = 0.18  # relative
+_PROFILE_MAX_CHARS = 8
+# Never applied to text set at body size: a short line of dialogue can sit at
+# the very bottom of a page, and deleting it would destroy real content.
+_PROFILE_MAX_BODY_RATIO = 0.85
+
+
+@dataclass
+class _PageNumberProfile:
+    y_fraction: float
+    font_size: float
+
+    def matches(self, block: Block, body_size: float) -> bool:
+        text = block.text.strip()
+        if not text or len(text) > _PROFILE_MAX_CHARS:
+            return False
+        if not block.font_size or not block.page_height:
+            return False
+        if body_size and block.font_size > body_size * _PROFILE_MAX_BODY_RATIO:
+            return False
+        if abs(block.font_size - self.font_size) > self.font_size * _PROFILE_SIZE_TOLERANCE:
+            return False
+        y_fraction = block.bbox[1] / block.page_height
+        return abs(y_fraction - self.y_fraction) <= _PROFILE_Y_TOLERANCE
+
+
+def _build_page_number_profile(confirmed: list[Block]) -> _PageNumberProfile | None:
+    """Learn where and how page numbers are set, from the ones we could read."""
+    usable = [b for b in confirmed if b.font_size and b.page_height]
+    if len(usable) < _MIN_CONFIRMED_FOR_PROFILE:
+        return None
+    y_fractions = sorted(b.bbox[1] / b.page_height for b in usable)
+    sizes = sorted(b.font_size for b in usable)
+    return _PageNumberProfile(
+        y_fraction=y_fractions[len(y_fractions) // 2],
+        font_size=sizes[len(sizes) // 2],
+    )
+
+
 def _is_repeating_furniture(
     pages: set[int], total_pages: int, odd_pages: int, even_pages: int
 ) -> bool:
@@ -107,6 +152,7 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
     # normalized_text -> band -> set of pages it appeared on
     occurrences: dict[tuple[str, str], set[int]] = defaultdict(set)
     candidates: dict[tuple[str, str], list[Block]] = defaultdict(list)
+    confirmed_page_numbers: list[Block] = []
 
     for page_num, blocks in blocks_by_page.items():
         for b in blocks:
@@ -118,6 +164,7 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
 
             if _PAGE_NUMBER_RE.match(b.text.strip()) and not _is_display_type(b, body_size):
                 furniture[b.block_id] = BlockRole.PAGE_NUMBER
+                confirmed_page_numbers.append(b)
                 continue
 
             if _looks_like_note_body(b.text):
@@ -141,4 +188,33 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
             for b in candidates[key]:
                 furniture[b.block_id] = role
 
+    _remove_mangled_page_numbers(
+        blocks_by_page, furniture, confirmed_page_numbers, body_size
+    )
     return furniture
+
+
+def _remove_mangled_page_numbers(
+    blocks_by_page: dict[int, list[Block]],
+    furniture: dict[str, BlockRole],
+    confirmed: list[Block],
+    body_size: float,
+) -> None:
+    """Catch page numbers whose digits OCR turned into letters.
+
+    A scan yields "51" as "s ı" and "17" as "IR"; no digit pattern can match
+    those, so they reached the EPUB as stray one-word paragraphs. They are
+    identified here by *position and type size* instead — the page number sits
+    in the same spot on every page — which is evidence text matching cannot
+    provide and which cannot touch body-size text.
+    """
+    profile = _build_page_number_profile(confirmed)
+    if profile is None:
+        return
+
+    for blocks in blocks_by_page.values():
+        for block in blocks:
+            if block.kind != "text" or block.block_id in furniture:
+                continue
+            if profile.matches(block, body_size):
+                furniture[block.block_id] = BlockRole.PAGE_NUMBER

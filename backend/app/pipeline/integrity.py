@@ -22,8 +22,14 @@ _TEXT_BEARING_ROLES = {
 }
 
 # Roles that preserve their source content as something other than flowing text
-# (a rendered image, a table grid). Their words leave the text stream legitimately.
-_PRESERVED_NON_TEXT_ROLES = {BlockRole.IMAGE_FALLBACK, BlockRole.TABLE, BlockRole.FORMULA}
+# (a rendered image, a table grid, a scene divider drawn as <hr/>). Their words
+# leave the text stream legitimately.
+_PRESERVED_NON_TEXT_ROLES = {
+    BlockRole.IMAGE_FALLBACK,
+    BlockRole.TABLE,
+    BlockRole.FORMULA,
+    BlockRole.THEMATIC_BREAK,
+}
 
 # Below this share of expected words surviving, the conversion is flagged for
 # review rather than reported as a clean success.

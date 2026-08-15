@@ -213,9 +213,12 @@ def merge_division_numbers(nodes: list[StructuralNode]) -> int:
             and _BARE_NUMBER_RE.match(_text_of_node(node))
             and not _BARE_NUMBER_RE.match(_text_of_node(nxt))
         ):
-            number = _text_of_node(node).rstrip(".) ")
+            # Joined with a space, never with invented punctuation: the source
+            # set "1" above "Kurban" with no full stop, and adding one would put
+            # a character in the book that the author did not write.
+            number = _text_of_node(node)
             title = _text_of_node(nxt)
-            nxt.text = f"{number}. {title}"
+            nxt.text = f"{number} {title}"
             nxt.source_block_ids = list(node.source_block_ids) + list(nxt.source_block_ids)
             nxt.level = min(node.level or 1, nxt.level or 1)
             nxt.confidence = max(node.confidence, nxt.confidence)

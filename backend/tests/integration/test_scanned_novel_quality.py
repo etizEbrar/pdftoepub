@@ -44,8 +44,12 @@ def converted(tmp_path_factory) -> tuple[QualityReport, str]:
         assert job.stage == JobStage.COMPLETED, f"{job.error_code}: {job.error_message}"
         assert job.epub_path
         with zipfile.ZipFile(job.epub_path) as zf:
+            # Body documents only: nav.xhtml repeats every chapter title, which
+            # would double-count its text and punctuation.
             xhtml = "\n".join(
-                zf.read(n).decode("utf-8") for n in zf.namelist() if n.endswith(".xhtml")
+                zf.read(n).decode("utf-8")
+                for n in zf.namelist()
+                if n.endswith(".xhtml") and "nav" not in n
             )
         yield job.quality_report, xhtml
     finally:
@@ -110,7 +114,7 @@ def test_chapters_are_detected_with_their_numbers(converted):
     assert report.chapter_count >= 3, f"expected the three chapters, got {report.chapter_count}"
     text = _plain_text(xhtml)
     for number, title in ((1, "Kurban"), (2, "Ben"), (3, "Bir")):
-        assert f"{number}. {title}" in text, f"chapter number not joined to {title!r}"
+        assert f"{number} {title}" in text, f"chapter number not joined to {title!r}"
 
 
 def test_chapter_headings_are_top_level_and_reachable_from_the_toc(converted):
@@ -172,3 +176,38 @@ def test_content_integrity_stays_high(converted):
     report, _ = converted
     assert report.content_integrity_ratio > 0.90
     assert report.word_count_epub > 0
+
+
+# --- no invented punctuation, measured over a whole book ------------------
+
+def test_the_epub_never_contains_more_ellipses_than_the_source(tmp_path_factory, converted):
+    """Whole-document invariant. An ellipsis is the punctuation most likely to
+    appear by accident — from a line join, a truncation, or as a stand-in for
+    text that could not be read — so its count may never grow."""
+    import fitz
+
+    _, xhtml = converted
+    pdf = build_scanned_novel_with_text_layer(tmp_path_factory.mktemp("check") / "novel.pdf")
+    doc = fitz.open(str(pdf))
+    source = "\n".join(doc[i].get_text("text") for i in range(doc.page_count))
+    doc.close()
+
+    body = _plain_text(xhtml)
+    for pattern in (re.compile("…"), re.compile(r"(?<!\.)\.{3}(?!\.)"), re.compile(r"\.\s\.\s\.")):
+        in_source = len(pattern.findall(source))
+        in_epub = len(pattern.findall(body))
+        assert in_epub <= in_source, (
+            f"pipeline invented {in_epub - in_source} instance(s) of {pattern.pattern!r}"
+        )
+
+
+def test_total_dot_count_never_grows(tmp_path_factory, converted):
+    import fitz
+
+    _, xhtml = converted
+    pdf = build_scanned_novel_with_text_layer(tmp_path_factory.mktemp("check2") / "novel.pdf")
+    doc = fitz.open(str(pdf))
+    source_dots = sum(doc[i].get_text("text").count(".") for i in range(doc.page_count))
+    doc.close()
+
+    assert _plain_text(xhtml).count(".") <= source_dots

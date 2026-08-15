@@ -148,7 +148,7 @@ def test_lone_chapter_number_is_folded_into_the_title():
     nodes = [_heading_node("n1", "1"), _heading_node("n2", "Kurban")]
     assert merge_division_numbers(nodes) == 1
     assert len(nodes) == 1
-    assert nodes[0].text == "1. Kurban"
+    assert nodes[0].text == "1 Kurban"
     assert nodes[0].source_block_ids == ["n1", "n2"]
 
 

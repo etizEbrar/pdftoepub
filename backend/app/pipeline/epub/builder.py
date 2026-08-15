@@ -310,6 +310,14 @@ def render_chapter_body(
                 parts.append(f'<div class="equation">{node.mathml}</div>')
             continue
 
+        if node.role == BlockRole.THEMATIC_BREAK:
+            # The source draws a scene change with a row of ornaments; <hr/> is
+            # its semantic equivalent and renders as a proper divider instead of
+            # the stray dots OCR produced.
+            flush_list()
+            parts.append('<hr class="scene-break"/>')
+            continue
+
         if node.role == BlockRole.VERSE:
             flush_list()
             parts.append(_render_verse(node, resolve_note_href, _dir_attribute(node, base_direction)))
@@ -348,7 +356,10 @@ def render_chapter_body(
                 f'↩{"" if len(node.footnote_backrefs) == 1 else str(i + 1)}</a>'
                 for i, ref in enumerate(node.footnote_backrefs)
             )
-            prefix = f"{marker}. " if marker else ""
+            # The marker is reproduced as the source set it. Appending a full
+            # stop would put punctuation in the book that the author never
+            # wrote, which is the same defect as inventing an ellipsis.
+            prefix = f"{marker} " if marker else ""
             parts.append(
                 f'<aside epub:type="{epub_type}" id="{footnote_anchor_id(node.node_id)}"{dir_attr}>'
                 f"<p>{prefix}{content}{back_links}</p></aside>"

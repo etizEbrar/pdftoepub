@@ -134,6 +134,14 @@ caption {
   text-align: left;
 }
 
+hr.scene-break {
+  border: none;
+  border-top: 1px solid currentColor;
+  opacity: 0.35;
+  width: 30%;
+  margin: 1.6em auto;
+}
+
 div.equation {
   margin: 1em 0;
   text-align: center;

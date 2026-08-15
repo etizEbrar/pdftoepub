@@ -28,6 +28,8 @@ class BlockRole(str, Enum):
     QUOTE = "quote"
     ENDNOTE = "endnote"
     ENDNOTE_SECTION_HEADING = "endnote_section_heading"
+    # A centred row of ornaments ("* * *", "• • •") marking a scene change.
+    THEMATIC_BREAK = "thematic_break"
     VERSE = "verse"
     FORMULA = "formula"
     # A source region preserved verbatim as an image because semantic
