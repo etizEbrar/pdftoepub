@@ -635,6 +635,133 @@ def build_scanned_novel_with_text_layer(
     return path
 
 
+# --------------------------------------------------------------------------
+# N. Turkish novel carrying a defective OCR text layer
+#
+# Encodes the defect profile measured from a real 348-page Turkish paperback,
+# using invented prose. Each defect below was counted in that book:
+#   - diacritics dropped by the scanner ("için" -> "icin")
+#   - Turkish minimal pairs that must NOT be "corrected" (sakin/sakın)
+#   - "rn" misread as "m" ("yaşamım" -> "yaşarnım")
+#   - words split by a stray space ("Sırma" -> "S ırma")
+#   - a space before punctuation, and a missing space after it
+#   - literary ellipses, both spaced (". . .") and plain ("...")
+#   - fi/fl ligatures
+# --------------------------------------------------------------------------
+
+# Sentences repeated enough to establish this document's vocabulary, the way a
+# real book repeats its own words.
+_TR_CORPUS_SENTENCES = [
+    # "için" and "değil" are among the commonest words in Turkish prose; the
+    # real book carried them 540 and 285 times against a single mis-scan each.
+    "Bunu senin için yaptım ve her şey için teşekkür ederim.",
+    "Onun için geldim, senin için kaldım, bizim için bekledim.",
+    "Bu iş değil, bu bir yaşam biçimi değil mi diye sordum.",
+    "Kolay değil, hiç değil, asla değil diye tekrarladı.",
+    "Yaşamım boyunca hep aynı şeyi düşündüm ve yaşamım değişti.",
+    "Sırma bana baktı ve Sırma gülümsedi, sonra Sırma gitti.",
+    "Nefes almak için durdum, nefes verdim, yine nefes aldım.",
+]
+# The other half of each Turkish minimal pair, at a realistic frequency: common
+# enough to tempt a frequency-only corrector, not so common that the ratio test
+# alone would save us. These appear on a few pages, not every page.
+_TR_MINIMAL_PAIR_COUNTERPARTS = [
+    "Sakın oraya gitme dedi bana.",
+    "Kapıyı açıyorum ve içeri giriyorum.",
+    "O kişi geldi ve bekledi.",
+]
+# Words whose correct forms the corpus establishes, paired with the way the
+# scanner mangled them on one page.
+_TR_DEFECTS = [
+    ("Bunu senin icin yaptım.", "dropped cedilla: icin -> için"),
+    ("Bu is degil dedi bana.", "dropped diacritics: degil -> değil"),
+    ("Yaşarnım boyunca böyle oldu.", "rn misread as m"),
+    ("Sonra S ırma içeri girdi.", "stray space inside a word"),
+    ("Durdum ve n efes aldım.", "stray space inside a word"),
+]
+# Sentences that must survive untouched: real Turkish words a frequency-only
+# corrector would happily replace with a different real word.
+_TR_MUST_NOT_CHANGE = [
+    "Çok sakin bir adam olduğunu düşündüm.",   # sakin (calm) vs sakın (beware)
+    "Ona çok acıyorum, gerçekten üzgünüm.",     # acıyorum (I pity) vs açıyorum
+    "Kışı burada geçirmek istiyorum artık.",    # kışı (its winter) vs kişi
+]
+
+
+def build_turkish_ocr_novel(path: Path, pages: int = 30) -> Path:
+    """A Turkish novel whose text layer carries realistic OCR damage."""
+    doc = fitz.open()
+    font_path = _UNICODE_FONT_PATH if unicode_font_available() else None
+    font = fitz.Font(fontfile=font_path) if font_path else fitz.Font("helv")
+
+    for index in range(pages):
+        page_no = index + 1
+        page = doc.new_page(width=396, height=561)
+        writer = fitz.TextWriter(page.rect)
+        # Body text starts below the header band (12% of page height). Starting
+        # higher would put identical prose in the running-head zone on every
+        # page, where furniture detection would rightly strip it.
+        y = 95.0
+
+        # Alternating running head, omitted on the opening page.
+        if page_no > 1:
+            head = "Seyir" if page_no % 2 == 0 else "Yazar"
+            writer.append(fitz.Point(180, 20), head, font=font, fontsize=6.1)
+
+        if page_no == 1:
+            writer.append(fitz.Point(150, 60), "1", font=font, fontsize=28.9)
+            writer.append(fitz.Point(120, 110), "Başlangıç", font=font, fontsize=28.9)
+            y = 170.0
+
+        # Vocabulary-establishing prose on every page.
+        for sentence in _TR_CORPUS_SENTENCES:
+            writer.append(fitz.Point(28, y), sentence, font=font, fontsize=8.85)
+            y += 15
+
+        if page_no == 3:
+            for damaged, _why in _TR_DEFECTS:
+                writer.append(fitz.Point(28, y), damaged, font=font, fontsize=8.85)
+                y += 15
+        if page_no % 4 == 0:
+            for line in _TR_MINIMAL_PAIR_COUNTERPARTS:
+                writer.append(fitz.Point(28, y), line, font=font, fontsize=8.85)
+                y += 15
+        if page_no == 5:
+            for keep in _TR_MUST_NOT_CHANGE:
+                writer.append(fitz.Point(28, y), keep, font=font, fontsize=8.85)
+                y += 15
+        if page_no == 7:
+            # Punctuation damage plus legitimate literary ellipses.
+            for line in (
+                "Merhaba , nasılsın ?",
+                "Bir,iki,üç diye saydı.",
+                "Ne yapacağımı bilmiyorum...",
+                "Belki de . . . belki hiç.",
+                "Gerçekten mi??",
+            ):
+                writer.append(fitz.Point(28, y), line, font=font, fontsize=8.85)
+                y += 15
+        if page_no == 9:
+            # Ligatures and a line-break hyphen, both as a scanner emits them.
+            writer.append(fitz.Point(28, y), "Ofis dosyası ﬁrmanın eﬂatun raporu.", font=font, fontsize=8.85)
+            y += 15
+            writer.append(fitz.Point(28, y), "Uzun bir cümlenin ya­", font=font, fontsize=8.85)
+            y += 15
+            writer.append(fitz.Point(28, y), "şam boyu süren etkisi vardır.", font=font, fontsize=8.85)
+            y += 15
+            # A real hyphenated word that must never be merged.
+            writer.append(fitz.Point(28, y), "Türk-Amerikan ilişkileri ve e-posta adresi.", font=font, fontsize=8.85)
+            y += 15
+
+        spaced = " ".join(str(page_no)) if page_no >= 10 else str(page_no)
+        writer.append(fitz.Point(190, 543), spaced, font=font, fontsize=6.0)
+        writer.write_text(page)
+
+    doc.save(str(path), deflate=True, garbage=4)
+    doc.close()
+    return path
+
+
 BUILDERS = {
     "turkish_novel": build_turkish_novel,
     "two_column_academic": build_two_column_academic,

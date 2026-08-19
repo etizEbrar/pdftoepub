@@ -143,6 +143,7 @@ class DocumentVocabulary:
             for word in _WORD_RE.findall(_SENTINEL_RANGE.sub("", block.text)):
                 counter[fold(word)] += 1
         self._freq = counter
+        self._by_key: dict[str, list[tuple[str, int]]] | None = None
 
     def frequency(self, word: str) -> int:
         return self._freq.get(fold(word), 0)
@@ -153,6 +154,22 @@ class DocumentVocabulary:
     def is_fragment(self, word: str) -> bool:
         """True when a token is too rare to be a standalone word here."""
         return self.frequency(word) <= MAX_FRAGMENT_FREQUENCY
+
+    def attested_spellings(self, key: str) -> list[tuple[str, int]]:
+        """Well-attested words sharing a diacritic-stripped key, most common first.
+
+        Built lazily and cached: a book has tens of thousands of distinct words
+        and this is consulted once per rare token.
+        """
+        if self._by_key is None:
+            index: dict[str, list[tuple[str, int]]] = {}
+            for word, count in self._freq.items():
+                if count >= MIN_CANONICAL_FREQUENCY:
+                    index.setdefault(diacritic_key(word), []).append((word, count))
+            for spellings in index.values():
+                spellings.sort(key=lambda pair: -pair[1])
+            self._by_key = index
+        return self._by_key.get(key, [])
 
 
 # --- OCR confusion table --------------------------------------------------
@@ -183,6 +200,47 @@ AMBIGUOUS_CONFUSIONS: tuple[tuple[str, str], ...] = (
     ("s", "ş"), ("g", "ğ"), ("c", "ç"), ("o", "ö"), ("u", "ü"),
     ("i", "ı"), ("ı", "i"),
 )
+
+# --- Turkish diacritic restoration ----------------------------------------
+#
+# Scanners drop diacritics; they almost never invent them. That asymmetry is
+# what makes a narrow class of these corrections safe, and it is enforced
+# directly: a correction may never *reduce* the number of marked letters.
+#
+# Three independent guards must all agree before a word is changed:
+#   1. stripping diacritics from both forms yields the same key
+#   2. exactly one well-attested word in the document shares that key
+#   3. that word is overwhelmingly more common than the observed one
+# plus the asymmetry rule above. Together they admit "icin" -> "için" while
+# refusing "kışı" -> "kişi" (which would strip a diacritic) and "sakin" ->
+# "sakın" (where the two forms are too close in frequency to separate).
+_DIACRITIC_FOLD = str.maketrans({
+    "ş": "s", "Ş": "s", "ğ": "g", "Ğ": "g", "ç": "c", "Ç": "c",
+    "ö": "o", "Ö": "o", "ü": "u", "Ü": "u", "ı": "i", "İ": "i",
+    "â": "a", "Â": "a", "î": "i", "Î": "i", "û": "u", "Û": "u",
+})
+# Letters carrying a visible mark. "ı" is deliberately absent: it is the
+# dotless counterpart of "i", not a marked form of it, so neither direction of
+# that pair counts as adding or losing a diacritic.
+_MARKED_LETTERS = frozenset("şŞğĞçÇöÖüÜâÂîÎûÛ")
+
+# How much more common the candidate must be. Measured against the real book:
+# "kişi" is 39x "kışı" and "sakın" 10x "sakin" — both real words that must
+# survive — while "için" is 540x "icin" and "değil" 285x "degil".
+DIACRITIC_FREQUENCY_RATIO = 100
+# The observed form must be a true one-off. A word the document uses more than
+# once is a word the document uses — "acıyorum" (I pity) appears twice in the
+# real book and is not a misspelling of "açıyorum" (I open).
+DIACRITIC_MAX_OBSERVED_FREQUENCY = 1
+
+
+def diacritic_key(word: str) -> str:
+    """Strip Turkish diacritics, giving a key shared by all spellings."""
+    return word.translate(_DIACRITIC_FOLD).lower()
+
+
+def _marked_count(word: str) -> int:
+    return sum(1 for c in word if c in _MARKED_LETTERS)
 
 # A shape confusion inside a short word is ambiguous; inside a long one, with a
 # frequent target, it is convincing. "rnek" (from a hyphen-split "örnek") must
@@ -216,6 +274,18 @@ def _confusion_candidates(
 # --- level 1: deterministic text hygiene ---------------------------------
 
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# Typographic ligatures are presentation forms of ordinary letters. Leaving them
+# in breaks search, copy and text-to-speech, and some readers show a blank box.
+# Expanded explicitly rather than via NFKC, which would also rewrite fractions,
+# circled numbers and superscripts that may be meaningful in the source.
+_LIGATURES = {
+    "\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl",
+    "\ufb03": "ffi", "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st",
+    "\u0132": "IJ", "\u0133": "ij", "\u0152": "OE", "\u0153": "oe",
+    "\ufb13": "\u0574\u0576", "\ufb14": "\u0574\u0565",
+}
+_LIGATURE_RE = re.compile("|".join(map(re.escape, _LIGATURES)))
 # A space wrongly separating a word from the punctuation that follows it.
 # The spaced ellipsis ". . ." is excluded: it is real typography in these books.
 _SPACE_BEFORE_PUNCT = re.compile(r"(?<=[^\s.])\s+([,;:!?])")
@@ -233,6 +303,13 @@ def _normalise_text(text: str) -> tuple[str, list[tuple[CorrectionKind, str, str
     if normalised != text:
         changes.append((CorrectionKind.UNICODE, text, normalised, "NFC normalisation"))
     text = normalised
+
+    expanded = _LIGATURE_RE.sub(lambda m: _LIGATURES[m.group(0)], text)
+    if expanded != text:
+        changes.append(
+            (CorrectionKind.UNICODE, text, expanded, "expanded typographic ligature")
+        )
+    text = expanded
 
     stripped = _CONTROL_CHARS.sub("", text)
     if stripped != text:
@@ -281,7 +358,10 @@ def _repair_words(
 
         # Diacritic candidates are surfaced for review but never applied: in
         # Turkish they routinely turn one real word into a different real one.
-        _report_ambiguous(word, current, vocab, page, block_id, report)
+        repaired = _diacritic_repair(word, current, vocab, page, block_id, report)
+        if repaired is not None:
+            parts[index] = repaired
+            continue
 
         if len(word) < MIN_CONFUSION_WORD_LENGTH:
             continue
@@ -319,40 +399,100 @@ def _repair_words(
     return "".join(parts)
 
 
-def _report_ambiguous(
+def _diacritic_repair(
     word: str,
     current: int,
     vocab: DocumentVocabulary,
     page: int,
     block_id: str,
     report: RepairReport,
-) -> None:
-    """Record a plausible diacritic fix without applying it.
+) -> str | None:
+    """Restore diacritics the scanner dropped, or explain why it was refused.
 
-    The user sees these in the quality report, so a genuine scan error is
-    visible rather than silently accepted — but the text keeps whatever the
-    source actually said.
+    Returns the corrected word when every guard agrees, otherwise None with an
+    UNCERTAIN record so the candidate is visible in the quality report.
     """
-    for candidate, rule in _confusion_candidates(word, AMBIGUOUS_CONFUSIONS):
-        candidate_frequency = vocab.frequency(candidate)
-        if candidate_frequency < MIN_CANONICAL_FREQUENCY:
-            continue
-        report.add(
-            Correction(
-                kind=CorrectionKind.OCR_CHARACTER,
-                grade=Grade.UNCERTAIN,
-                original=word,
-                corrected=candidate,
-                reason=(
-                    f"{rule} would give {candidate!r} ({candidate_frequency}x), but Turkish "
-                    "minimal pairs make this unsafe without a lexicon; text left as found"
-                ),
-                confidence=0.45,
-                page=page,
-                block_id=block_id,
-            )
+    key = diacritic_key(word)
+    candidates = [
+        (spelling, count)
+        for spelling, count in vocab.attested_spellings(key)
+        if fold(spelling) != fold(word)
+    ]
+    if not candidates:
+        return None
+
+    # More than one attested spelling means the document itself uses both; the
+    # frequency evidence cannot say which one this token was meant to be.
+    if len(candidates) > 1:
+        _record_refusal(
+            word, candidates[0][0], page, block_id, report,
+            f"{len(candidates)} spellings of {key!r} are attested here; ambiguous",
         )
-        return
+        return None
+
+    candidate, candidate_count = candidates[0]
+
+    # A scanner loses diacritics, it does not add them, so a correction must
+    # *gain* a marked letter. This also excludes bare i/ı swaps, where neither
+    # form is marked: "kışı" and "kişi" both carry one ş, so an asymmetry test
+    # cannot separate them, and both are ordinary Turkish words.
+    if _marked_count(candidate) <= _marked_count(word):
+        _record_refusal(
+            word, candidate, page, block_id, report,
+            "does not restore a dropped diacritic (i/ı swaps are ambiguous in Turkish)",
+        )
+        return None
+
+    # A word the document uses more than once is a word the document uses.
+    if current > DIACRITIC_MAX_OBSERVED_FREQUENCY:
+        _record_refusal(
+            word, candidate, page, block_id, report,
+            f"{word!r} occurs {current}x, so it is likely a real word here, not a scan error",
+        )
+        return None
+
+    if candidate_count < max(1, current) * DIACRITIC_FREQUENCY_RATIO:
+        _record_refusal(
+            word, candidate, page, block_id, report,
+            f"{candidate!r} is only {candidate_count / max(1, current):.0f}x more common; "
+            f"below the {DIACRITIC_FREQUENCY_RATIO}x needed to rule out a real rare word",
+        )
+        return None
+
+    replacement = _match_case(word, candidate)
+    report.add(
+        Correction(
+            kind=CorrectionKind.OCR_CHARACTER,
+            grade=Grade.CONFIDENT,
+            original=word,
+            corrected=replacement,
+            reason=(
+                f"dropped diacritic: {candidate!r} occurs {candidate_count}x and is the only "
+                f"attested spelling of {key!r}; {word!r} occurs {current}x"
+            ),
+            confidence=min(0.99, 0.90 + min(candidate_count, 500) / 5000),
+            page=page,
+            block_id=block_id,
+        )
+    )
+    return replacement
+
+
+def _record_refusal(
+    word: str, candidate: str, page: int, block_id: str, report: RepairReport, reason: str
+) -> None:
+    report.add(
+        Correction(
+            kind=CorrectionKind.OCR_CHARACTER,
+            grade=Grade.UNCERTAIN,
+            original=word,
+            corrected=candidate,
+            reason=f"{reason}; text left exactly as found",
+            confidence=0.45,
+            page=page,
+            block_id=block_id,
+        )
+    )
 
 
 def _match_case(original: str, candidate: str) -> str:
