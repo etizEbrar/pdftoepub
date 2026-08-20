@@ -8,8 +8,8 @@ produced by running the thing described.
 
 | Item | State |
 | --- | --- |
-| Backend test suite | 254 passed |
-| iOS unit tests | 34 passed |
+| Backend test suite | 287 passed |
+| iOS unit tests | 36 passed |
 | iOS UI tests | 6 passed, including a real end-to-end conversion against a live backend |
 | Release archive | succeeds, no warnings |
 | App Store export | succeeds — `Apple Distribution` signature, `get-task-allow=false`, `beta-reports-active=true` |
@@ -18,6 +18,20 @@ produced by running the thing described.
 | `CFBundleIconName` | present at the top level of Info.plist |
 | Conversion performance | ~48 ms/page at 520 pages, flat memory (~170 MB peak), EPUBCheck passing at 10/100/300/520 pages |
 | AI cost | `ai_provider=none` throughout; no API key required or used |
+
+## Deployment readiness
+
+The backend has been hardened for public exposure and the deployment is fully
+prepared, but **nothing is deployed**. See [deployment.md](deployment.md) for the
+procedure and the account details required.
+
+| Item | State |
+| --- | --- |
+| Container image | `backend/Dockerfile` written; **never built** — Docker is not installed here and free disk was too low to add it safely |
+| Platform config | `backend/fly.toml` — TLS, health check, restart, volume, resource sizing |
+| Production hardening | Verified against a real server in `ENVIRONMENT=production`: docs hidden (404), HSTS set, streaming upload limit, page-count ceiling, conversion timeout, per-IP throttling, sanitised download filenames, validated job ids |
+| Data retention | Verified on real data: `DELETE` removes files and row; the TTL sweep removes both for abandoned jobs |
+| Cloud credentials | **None on this machine** — no CLI, no credential store, no environment variables |
 
 ## Blocking: the app has no server to talk to
 
@@ -82,7 +96,14 @@ Export compliance is already answered in the build:
 
 ## Not verified
 
+- **No public HTTPS endpoint exists**, so nothing has been tested from an
+  external network. Every conversion measured here ran against a server on this
+  machine.
+- **The container image has never been built or run.**
 - **The app has never been launched on the physical iPhone.** The Release build
   installs successfully, but launching it requires the device to be unlocked.
 - **Nothing has been uploaded to TestFlight or App Store Connect**, and no
   Apple review has taken place.
+- The full chain the release plan calls for — real iOS app → public HTTPS
+  backend → EPUB → Apple Books — **cannot be run until the backend is
+  deployed.**
