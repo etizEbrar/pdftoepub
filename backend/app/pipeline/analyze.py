@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import fitz  # PyMuPDF
 
-from app.core.errors import CorruptedPDFError, EncryptedPDFError, UnsupportedPDFError
+from app.core.config import settings
+from app.core.errors import (
+    CorruptedPDFError,
+    EncryptedPDFError,
+    UnsupportedDocumentComplexityError,
+    UnsupportedPDFError,
+)
 from app.core.logging import get_logger
 from app.models.document import PageTextKind, PDFAnalysis, PDFClassification, TextDirection
 from app.pipeline.bidi import detect_direction
@@ -30,6 +36,16 @@ def open_pdf(path: str) -> fitz.Document:
     if doc.needs_pass:
         doc.close()
         raise EncryptedPDFError()
+
+    # A PDF can declare far more pages than anyone would convert, and each page
+    # costs real work. Refuse before that occupies a worker for hours.
+    if doc.page_count > settings.max_page_count:
+        page_count = doc.page_count
+        doc.close()
+        raise UnsupportedDocumentComplexityError(
+            f"This PDF has {page_count:,} pages, more than the "
+            f"{settings.max_page_count:,}-page limit."
+        )
 
     return doc
 

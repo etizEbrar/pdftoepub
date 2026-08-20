@@ -23,11 +23,16 @@ final class ConversionViewModel {
     var selectedMode: ConversionMode
 
     private let settings: AppSettings
+    private let makeClient: (URL) -> APIClient
     private var currentJobID: String?
     private var conversionTask: Task<Void, Never>?
 
-    init(settings: AppSettings) {
+    init(
+        settings: AppSettings,
+        makeClient: @escaping (URL) -> APIClient = { LiveAPIClient(baseURL: $0) }
+    ) {
         self.settings = settings
+        self.makeClient = makeClient
         self.selectedMode = settings.preferredMode
     }
 
@@ -115,7 +120,7 @@ final class ConversionViewModel {
         phase = .converting(document)
         progress = nil
 
-        let service = ConversionService(client: LiveAPIClient(baseURL: baseURL))
+        let service = ConversionService(client: makeClient(baseURL))
         let mode = selectedMode
 
         conversionTask = Task { [weak self] in
@@ -134,6 +139,13 @@ final class ConversionViewModel {
 
                 let epubFilename = (document.filename as NSString).deletingPathExtension + ".epub"
                 let epubURL = try await service.download(id: jobID, filename: epubFilename)
+
+                // The book is on the device now, so the server has no further
+                // reason to hold the user's document. The TTL sweep would get
+                // there eventually; asking immediately means the window is
+                // seconds rather than hours. Best-effort by design — a failure
+                // here must not turn a finished conversion into an error.
+                await service.cleanUp(id: jobID)
 
                 await MainActor.run {
                     self.phase = .completed(document, report, epubURL: epubURL)

@@ -64,7 +64,31 @@ async def run_pipeline(job_id: str) -> None:
     if job is None:
         logger.error("job %s vanished before processing could start", job_id)
         return
-    await asyncio.to_thread(_run_pipeline_sync, job)
+
+    # A conversion that never returns would hold one of a small number of
+    # workers forever, so every later job starves behind it. The wait is capped;
+    # the thread itself cannot be killed, but the worker is released and the job
+    # is reported as failed rather than appearing to hang.
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_run_pipeline_sync, job),
+            timeout=settings.conversion_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "job %s exceeded the %ds conversion timeout",
+            job_id,
+            settings.conversion_timeout_seconds,
+        )
+        current = store.get_job(job_id)
+        if current is not None and current.stage not in (JobStage.COMPLETED, JobStage.FAILED):
+            current.stage = JobStage.FAILED
+            current.error_code = "conversion_timeout"
+            current.error_message = (
+                "This document took too long to convert and was stopped. "
+                "Your original PDF was not modified."
+            )
+            _update(current)
 
 
 def _run_pipeline_sync(job: Job) -> None:

@@ -39,19 +39,41 @@ def delete_job_files(job_id: str) -> None:
 
 
 def sweep_expired_jobs(ttl_hours: int | None = None) -> list[str]:
-    """Delete job directories older than the TTL. Returns deleted job ids."""
-    ttl_seconds = (ttl_hours if ttl_hours is not None else settings.job_ttl_hours) * 3600
+    """Delete expired job directories *and* their database rows.
+
+    Both halves matter. The directory holds the user's PDF and the EPUB built
+    from it; the row holds the source filename, the detected book title and the
+    on-disk paths. Removing only the files would leave a permanent record of
+    every book anyone ever converted, which is exactly the kind of retention
+    this service promises not to have.
+    """
+    # Imported here rather than at module scope: the store imports settings, and
+    # keeping this local avoids coupling storage to the job store's import order.
+    from app.jobs import store
+
+    ttl = ttl_hours if ttl_hours is not None else settings.job_ttl_hours
+    ttl_seconds = ttl * 3600
     now = time.time()
     deleted: list[str] = []
-    if not settings.jobs_dir.exists():
-        return deleted
-    for entry in settings.jobs_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        age = now - entry.stat().st_mtime
-        if age > ttl_seconds:
-            shutil.rmtree(entry, ignore_errors=True)
-            deleted.append(entry.name)
+
+    if settings.jobs_dir.exists():
+        for entry in settings.jobs_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            if now - entry.stat().st_mtime > ttl_seconds:
+                shutil.rmtree(entry, ignore_errors=True)
+                deleted.append(entry.name)
+
+    rows_removed = 0
+    for job_id in store.list_expired_job_ids(ttl):
+        store.delete_job(job_id)
+        rows_removed += 1
+        # A row can outlive its directory (or vice versa); report the union.
+        if job_id not in deleted:
+            deleted.append(job_id)
+
     if deleted:
-        logger.info("swept %d expired job(s)", len(deleted))
+        logger.info(
+            "swept %d expired job(s) (%d database row(s))", len(deleted), rows_removed
+        )
     return deleted

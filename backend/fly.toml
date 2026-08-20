@@ -1,0 +1,68 @@
+# Fly.io deployment for the conversion backend.
+#
+# Chosen because this workload needs a long-lived process with local disk and a
+# JRE + Tesseract in the image — which rules out serverless — and Fly provides
+# TLS, health checks and restart-on-failure without any of it being assembled by
+# hand. Nothing here is Fly-specific beyond this file: the Dockerfile runs on
+# any container host.
+#
+# `app` must be set to a name you have registered. It is intentionally left as a
+# placeholder rather than invented.
+
+app = "CHANGE-ME-YOUR-FLY-APP-NAME"
+primary_region = "CHANGE-ME"          # e.g. "fra", "ams", "iad" — pick one near your users
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  # No paid AI. The conversion is fully deterministic and local.
+  AI_PROVIDER = "none"
+  DATA_DIR = "/data"
+  PORT = "8000"
+  OCR_ENABLED = "true"
+  OCR_LANGUAGES = "eng+tur"
+  MAX_UPLOAD_MB = "200"
+  MAX_PAGE_COUNT = "2000"
+  # Uploaded documents are deleted this many hours after conversion at the
+  # latest; the iOS client also deletes each job as soon as it has the EPUB.
+  JOB_TTL_HOURS = "6"
+  JOB_CONCURRENCY = "2"
+
+[http_service]
+  internal_port = 8000
+  # Fly terminates TLS and redirects http→https, so the app is only ever
+  # reachable over HTTPS from outside.
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # A conversion in flight must not be killed by the machine stopping under it.
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    # Conversions are CPU-bound and queued in-process; admitting hundreds of
+    # concurrent requests would not make them finish faster.
+    soft_limit = 20
+    hard_limit = 40
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "20s"
+  method = "GET"
+  path = "/health"
+
+# Temporary conversion files. A volume keeps a restart from losing a job that is
+# mid-flight; it is not long-term storage — the TTL sweep still deletes
+# everything, and no document is meant to outlive its conversion.
+[[mounts]]
+  source = "pdftoepub_data"
+  destination = "/data"
+
+[[vm]]
+  # A 500-page book peaks around 170MB, but OCR of a large scan at 300dpi is
+  # heavier; 2GB leaves room for two concurrent conversions.
+  size = "shared-cpu-2x"
+  memory = "2gb"
