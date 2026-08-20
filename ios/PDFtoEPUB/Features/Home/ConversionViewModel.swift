@@ -95,6 +95,21 @@ final class ConversionViewModel {
             )
             return
         }
+        // Check before uploading rather than after converting: failing at the
+        // download step would throw away the whole conversion.
+        if DiskSpace.isInsufficient(forSourceOfSize: Int64(document.byteCount)) {
+            phase = .failed(
+                ConversionFailure(
+                    code: "insufficient_storage",
+                    message: """
+                        There isn't enough free space on this device to save the \
+                        converted book. Free up some space and try again.
+                        """,
+                    isRetryable: false
+                )
+            )
+            return
+        }
 
         settings.preferredMode = selectedMode
         phase = .converting(document)

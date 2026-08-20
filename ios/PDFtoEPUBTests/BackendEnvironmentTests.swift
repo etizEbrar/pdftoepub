@@ -137,3 +137,39 @@ final class BackendEnvironmentTests: XCTestCase {
         XCTAssertEqual(settings.baseURL?.host, "convert.example.com")
     }
 }
+
+/// The privacy manifest declares that this app reads disk space, so that has to
+/// be a true statement about the shipped binary.
+final class DiskSpaceTests: XCTestCase {
+    func testTheDeviceReportsAvailableCapacity() {
+        let available = DiskSpace.availableBytes()
+        XCTAssertNotNil(available, "the volume should report important-usage capacity")
+        XCTAssertGreaterThan(available ?? 0, 0)
+    }
+
+    func testRequiredSpaceAlwaysLeavesHeadroom() {
+        let required = DiskSpace.estimatedRequiredBytes(forSourceOfSize: 0)
+        XCTAssertGreaterThanOrEqual(required, DiskSpace.minimumHeadroomBytes)
+    }
+
+    func testRequiredSpaceGrowsWithTheSourceDocument() {
+        let small = DiskSpace.estimatedRequiredBytes(forSourceOfSize: 1_000_000)
+        let large = DiskSpace.estimatedRequiredBytes(forSourceOfSize: 200_000_000)
+        XCTAssertGreaterThan(large, small)
+    }
+
+    /// A normal book on a working device must not be blocked.
+    func testATypicalBookIsNotReportedAsTooLargeForTheDisk() {
+        XCTAssertFalse(DiskSpace.isInsufficient(forSourceOfSize: 5_000_000))
+    }
+
+    /// An absurd request must be refused, proving the check is live rather than
+    /// a function that always returns false.
+    func testAnImpossiblyLargeDocumentIsRefused() {
+        let available = DiskSpace.availableBytes() ?? 0
+        XCTAssertTrue(
+            DiskSpace.isInsufficient(forSourceOfSize: available + 1),
+            "a document larger than the free space must be refused"
+        )
+    }
+}
