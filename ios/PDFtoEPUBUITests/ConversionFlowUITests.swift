@@ -11,8 +11,51 @@ final class ConversionFlowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Where the backend is, for this run.
+    ///
+    /// Defaults to localhost so the simulator suite behaves as before. Set
+    /// `UITEST_BACKEND_URL` to point a *device* run at a machine on the network
+    /// — on real hardware "localhost" is the phone itself, so without this the
+    /// test can only ever skip.
+    private var backendURLString: String {
+        // Read from the test bundle's Info.plist rather than the environment:
+        // a device run executes inside a runner app on the phone, and build
+        // settings reach it reliably where an exported shell variable does not.
+        // Set with INFOPLIST_KEY_UITestBackendURL=... on the xcodebuild command.
+        if let configured = Bundle(for: Self.self)
+            .object(forInfoDictionaryKey: "UITestBackendURL") as? String,
+            Self.isRealValue(configured)
+        {
+            return configured
+        }
+        if let fromEnv = ProcessInfo.processInfo.environment["UITEST_BACKEND_URL"],
+           !fromEnv.isEmpty
+        {
+            return fromEnv
+        }
+        return "http://localhost:8000"
+    }
+
+    /// True when this run was pointed at a specific backend, which is what tells
+    /// the test it must configure the app rather than trust a built-in default.
+    private var backendWasSuppliedForThisRun: Bool {
+        let bundled = Bundle(for: Self.self)
+            .object(forInfoDictionaryKey: "UITestBackendURL") as? String
+        return Self.isRealValue(bundled ?? "")
+            || Self.isRealValue(ProcessInfo.processInfo.environment["UITEST_BACKEND_URL"] ?? "")
+    }
+
+    /// When the environment variable is unset the build leaves the placeholder
+    /// text in place rather than an empty string. Treating that as an address
+    /// would turn every simulator run into a silent skip.
+    private static func isRealValue(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        return !trimmed.contains("${") && !trimmed.contains("$(")
+    }
+
     private func backendIsReachable() -> Bool {
-        guard let url = URL(string: "http://localhost:8000/health") else { return false }
+        guard let url = URL(string: backendURLString + "/health") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = 3
         let semaphore = DispatchSemaphore(value: 0)
@@ -25,11 +68,44 @@ final class ConversionFlowUITests: XCTestCase {
         return reachable
     }
 
+    /// Enters the backend address through Settings when the app doesn't already
+    /// have a working one. No-op when the build already points somewhere usable.
+    private func configureBackendIfNeeded(_ app: XCUIApplication) {
+        guard backendWasSuppliedForThisRun else { return }
+
+        app.buttons["Settings"].tap()
+        let field = app.textFields["settings.backendAddress"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "backend address field not found")
+
+        field.tap()
+        // Clear whatever is there, then type the address for this run.
+        if let existing = field.value as? String, !existing.isEmpty {
+            field.press(forDuration: 1.0)
+            if app.menuItems["Select All"].waitForExistence(timeout: 2) {
+                app.menuItems["Select All"].tap()
+            }
+        }
+        field.typeText(backendURLString)
+
+        app.buttons["settings.testConnection"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Connected (none)"].waitForExistence(timeout: 20)
+                || app.staticTexts["Connected"].waitForExistence(timeout: 2),
+            "the app could not reach \(backendURLString) from this device"
+        )
+        app.buttons["Done"].tap()
+    }
+
     func testConvertsAPDFEndToEndAndShowsRealQualityReport() throws {
-        try XCTSkipUnless(backendIsReachable(), "backend not running on localhost:8000")
+        try XCTSkipUnless(backendIsReachable(), "backend not reachable at \(backendURLString)")
 
         let app = XCUIApplication()
         app.launch()
+
+        // A device run starts with no configured server (Release ships without
+        // one), so set it through the real Settings screen — the same path a
+        // user takes — before attempting a conversion.
+        configureBackendIfNeeded(app)
 
         app.buttons["Select PDF"].tap()
 

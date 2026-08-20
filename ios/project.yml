@@ -95,12 +95,19 @@ targets:
     platform: iOS
     sources:
       - path: PDFtoEPUBUITests
+    # An explicit plist rather than a generated one, so the backend address can
+    # be baked in. A device run must be told where the backend is: on real
+    # hardware "localhost" is the phone itself. Empty here keeps the simulator
+    # suite on localhost; set UITEST_BACKEND_URL before `xcodegen generate`.
+    info:
+      path: PDFtoEPUBUITests/Info.plist
+      properties:
+        UITestBackendURL: ${UITEST_BACKEND_URL}
     dependencies:
       - target: PDFtoEPUB
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pdftoepub.uitests
-        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   PDFtoEPUB:
