@@ -115,9 +115,17 @@ final class LiveAPIClient: APIClient {
         let nsError = error as NSError
         guard nsError.domain == NSURLErrorDomain else { return .decoding }
         switch nsError.code {
+        // Kept apart because the fix differs: reconnect, fix the address, or
+        // start the server. Collapsing them into one "offline" message sends
+        // people to check Wi-Fi when their server simply isn't running.
         case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost,
-             NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost:
-            return .notConnected
+             NSURLErrorInternationalRoamingOff, NSURLErrorDataNotAllowed:
+            return .offline
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            return .hostNotFound
+        case NSURLErrorCannotConnectToHost, NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateUntrusted, NSURLErrorAppTransportSecurityRequiresSecureConnection:
+            return .serverUnavailable
         case NSURLErrorTimedOut:
             return .timedOut
         case NSURLErrorCancelled:

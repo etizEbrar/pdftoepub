@@ -75,9 +75,23 @@ final class ConversionViewModel {
 
     func startConversion() {
         guard let document = selectedDocument else { return }
+        // Separate "you have not set this up yet" from "what you set up is
+        // wrong" — the first is a normal first run, the second is a mistake to
+        // correct. Both send the user to Settings rather than offering a retry
+        // that would fail identically.
         guard let baseURL = settings.baseURL else {
             phase = .failed(
-                ConversionFailure(code: "invalid_url", message: APIError.invalidURL.userMessage, isRetryable: false)
+                ConversionFailure(
+                    code: "backend_not_configured",
+                    message: APIError.notConfigured.userMessage,
+                    isRetryable: false
+                )
+            )
+            return
+        }
+        if let issue = settings.addressIssue {
+            phase = .failed(
+                ConversionFailure(code: "invalid_url", message: issue.message, isRetryable: false)
             )
             return
         }
@@ -152,17 +166,21 @@ final class ConversionViewModel {
     /// PDF" instead. Transport problems and server-side hiccups do offer retry.
     private static let nonRetryableCodes: Set<String> = [
         "encrypted_pdf", "corrupted_pdf", "unsupported_pdf", "invalid_pdf",
-        "file_too_large", "unsupported_complexity", "invalid_url"
+        "file_too_large", "unsupported_complexity", "invalid_url",
+        "backend_not_configured", "host_not_found", "insufficient_storage"
     ]
 
     private static func failure(from error: APIError) -> ConversionFailure {
         let code: String
-        if case .server(let serverCode, _) = error {
-            code = serverCode
-        } else if case .invalidURL = error {
-            code = "invalid_url"
-        } else {
-            code = "network"
+        switch error {
+        case .server(let serverCode, _): code = serverCode
+        case .invalidURL: code = "invalid_url"
+        case .notConfigured: code = "backend_not_configured"
+        case .hostNotFound: code = "host_not_found"
+        case .offline: code = "offline"
+        case .serverUnavailable: code = "server_unavailable"
+        case .timedOut: code = "timeout"
+        default: code = "network"
         }
         return ConversionFailure(
             code: code,

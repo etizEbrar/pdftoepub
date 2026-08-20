@@ -8,6 +8,8 @@
 	<string>PDF to EPUB</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -43,6 +45,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PDF to EPUB connects to the conversion server you run on your own computer to convert your PDFs.</string>
+	<key>PRODUCTION_BACKEND_URL</key>
+	<string>$(PRODUCTION_BACKEND_URL)</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchScreen</key>

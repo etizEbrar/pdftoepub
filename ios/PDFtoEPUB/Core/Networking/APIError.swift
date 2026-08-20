@@ -19,7 +19,15 @@ enum APIError: LocalizedError, Equatable {
         """
 
     case invalidURL
-    case notConnected
+    /// No backend address has been configured yet.
+    case notConfigured
+    /// The device has no working network connection at all.
+    case offline
+    /// The address resolves to nothing — usually a typo in the host name.
+    case hostNotFound
+    /// The host is there but nothing is listening — server is down or the
+    /// port is wrong.
+    case serverUnavailable
     case timedOut
     case server(code: String, message: String)
     case unexpectedStatus(Int)
@@ -35,7 +43,19 @@ enum APIError: LocalizedError, Equatable {
         switch self {
         case .invalidURL:
             return "The backend address in Settings isn't a valid URL."
-        case .notConnected:
+        case .notConfigured:
+            return """
+                No conversion server is set up yet. Open Settings and enter the \
+                address of the server you're running.
+                """
+        case .offline:
+            return "This device isn't connected to a network. Your original PDF was not modified."
+        case .hostNotFound:
+            return """
+                No server was found at that address. Check the address in \
+                Settings for a typo.
+                """
+        case .serverUnavailable:
             return APIError.unreachableBackendMessage
         case .timedOut:
             return "The server took too long to respond. Your original PDF was not modified."
@@ -57,9 +77,11 @@ enum APIError: LocalizedError, Equatable {
     /// is *not* transient — it is a final answer and must surface immediately.
     var isTransient: Bool {
         switch self {
-        case .notConnected, .timedOut, .unexpectedStatus:
+        case .offline, .serverUnavailable, .timedOut, .unexpectedStatus:
             return true
-        case .server, .invalidURL, .decoding, .fileTooLarge, .cancelled:
+        // A bad address or an unconfigured app will not fix itself by polling.
+        case .server, .invalidURL, .notConfigured, .hostNotFound, .decoding,
+             .fileTooLarge, .cancelled:
             return false
         }
     }

@@ -19,24 +19,38 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("http://192.168.1.10:8000", text: $settings.baseURLString)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .onChange(of: settings.baseURLString) { _, _ in
-                            connectionState = .untested
+                    if BackendEnvironment.isManagedByBuild {
+                        // A hosted backend ships with the build; there is
+                        // nothing here for the user to get wrong.
+                        LabeledContent("Server", value: "Managed by the app")
+                    } else {
+                        TextField("http://192.168.1.10:8000", text: $settings.baseURLString)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .accessibilityIdentifier("settings.backendAddress")
+                            .onChange(of: settings.baseURLString) { _, _ in
+                                connectionState = .untested
+                            }
+
+                        if let issue = settings.addressIssue, !settings.baseURLString.isEmpty {
+                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
                         }
 
-                    Button {
-                        Task { await testConnection() }
-                    } label: {
-                        HStack {
-                            Text("Test connection")
-                            Spacer()
-                            connectionIndicator
+                        Button {
+                            Task { await testConnection() }
+                        } label: {
+                            HStack {
+                                Text("Test connection")
+                                Spacer()
+                                connectionIndicator
+                            }
                         }
+                        .accessibilityIdentifier("settings.testConnection")
+                        .disabled(connectionState == .checking || settings.addressIssue != nil)
                     }
-                    .disabled(connectionState == .checking)
                 } header: {
                     Text("Backend address")
                 } footer: {
@@ -66,6 +80,9 @@ struct SettingsView: View {
     }
 
     private var addressGuidance: String {
+        if BackendEnvironment.isManagedByBuild {
+            return "Conversions run on the app's own server. There is nothing to configure."
+        }
         #if targetEnvironment(simulator)
         return "Where your conversion server is running. In the Simulator, http://localhost:8000 works."
         #else
@@ -94,8 +111,8 @@ struct SettingsView: View {
     }
 
     private func testConnection() async {
-        guard let baseURL = settings.baseURL else {
-            connectionState = .unreachable("Invalid URL")
+        guard let baseURL = settings.baseURL, settings.addressIssue == nil else {
+            connectionState = .unreachable("Enter a valid address first")
             return
         }
         connectionState = .checking
@@ -104,14 +121,45 @@ struct SettingsView: View {
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                connectionState = .unreachable("Server error")
+            guard let http = response as? HTTPURLResponse else {
+                connectionState = .unreachable("Unexpected response")
                 return
             }
-            let health = try? JSONDecoder().decode(HealthResponse.self, from: data)
-            connectionState = .reachable(provider: health?.aiProvider ?? "none")
+            guard http.statusCode == 200 else {
+                // Something answered, so the address is right — it just isn't
+                // this app's backend, or the backend is unhealthy.
+                connectionState = .unreachable("Answered with HTTP \(http.statusCode)")
+                return
+            }
+            guard let health = try? JSONDecoder().decode(HealthResponse.self, from: data) else {
+                connectionState = .unreachable("Not a conversion server")
+                return
+            }
+            connectionState = .reachable(provider: health.aiProvider)
         } catch {
-            connectionState = .unreachable("Not reachable")
+            connectionState = .unreachable(Self.describe(error))
+        }
+    }
+
+    /// Names the actual failure so the user knows which thing to fix.
+    private static func describe(_ error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return "Not reachable" }
+        switch nsError.code {
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            return "No such host"
+        case NSURLErrorCannotConnectToHost:
+            return "Nothing listening on that port"
+        case NSURLErrorTimedOut:
+            return "Timed out"
+        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+            return "No network connection"
+        case NSURLErrorAppTransportSecurityRequiresSecureConnection:
+            return "Needs https"
+        case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted:
+            return "Secure connection failed"
+        default:
+            return "Not reachable"
         }
     }
 }

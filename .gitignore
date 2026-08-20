@@ -32,3 +32,8 @@ ios/**/.swiftpm/
 # Generated test fixtures (rebuilt on demand by tests/fixtures/corpus.py)
 backend/tests/fixtures/corpus/
 backend/tests/fixtures/*.pdf
+
+# Xcode archives, exported IPAs and other release artifacts
+ios/build/
+*.xcarchive
+*.ipa

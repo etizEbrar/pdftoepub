@@ -15,6 +15,12 @@ settings:
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # Address of the hosted conversion backend. Deliberately empty: no backend
+    # is deployed yet, and shipping a placeholder would produce a build that
+    # fails mysteriously instead of one that asks the user for an address.
+    # Set it here (or pass PRODUCTION_BACKEND_URL=... to xcodebuild) once a
+    # public HTTPS endpoint exists.
+    PRODUCTION_BACKEND_URL: ""
 
 packages: {}
 
@@ -55,12 +61,21 @@ targets:
               NSIncludesSubdomains: false
         NSLocalNetworkUsageDescription: PDF to EPUB connects to the conversion server you run on your own computer to convert your PDFs.
         ITSAppUsesNonExemptEncryption: false
+        # App Store validation rejects a binary without this at the top level.
+        # actool only writes it nested inside CFBundleIcons, so state it here.
+        CFBundleIconName: AppIcon
+        PRODUCTION_BACKEND_URL: $(PRODUCTION_BACKEND_URL)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pdftoepub.app
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: true
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          SWIFT_COMPILATION_MODE: wholemodule
+          VALIDATE_PRODUCT: YES
     dependencies: []
 
   PDFtoEPUBTests:

@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct HomeView: View {
+    @Environment(AppSettings.self) private var settings
     @State var viewModel: ConversionViewModel
     @State private var isImporterPresented = false
     @State private var isSettingsPresented = false
@@ -39,7 +40,8 @@ struct HomeView: View {
                         onChooseDifferent: {
                             viewModel.clearSelection()
                             isImporterPresented = true
-                        }
+                        },
+                        onOpenSettings: { isSettingsPresented = true }
                     )
                 }
             }
@@ -95,6 +97,10 @@ struct HomeView: View {
             }
             .padding(.horizontal, Theme.Spacing.loose)
 
+            if settings.needsBackendSetup {
+                setupPrompt
+            }
+
             Spacer()
 
             Button("Select PDF") { isImporterPresented = true }
@@ -109,5 +115,28 @@ struct HomeView: View {
             viewModel.selectDocument(at: url)
             return true
         }
+    }
+
+    /// Shown when no conversion server is configured. This build ships without a
+    /// hosted backend, so saying so up front beats letting the user choose a
+    /// file and then fail.
+    private var setupPrompt: some View {
+        VStack(spacing: Theme.Spacing.tight) {
+            Label("No conversion server set up", systemImage: "gearshape")
+                .font(.subheadline.weight(.medium))
+            Text("Add the address of the server you're running to start converting.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Open Settings") { isSettingsPresented = true }
+                .buttonStyle(.bordered)
+                .padding(.top, 2)
+        }
+        .padding(Theme.Spacing.regular)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, Theme.Spacing.loose)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.setupPrompt")
     }
 }

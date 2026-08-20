@@ -96,8 +96,28 @@ final class ConversionServiceTests: XCTestCase {
 
     func testServerErrorIsNotTreatedAsTransient() {
         XCTAssertFalse(APIError.server(code: "encrypted_pdf", message: "locked").isTransient)
-        XCTAssertTrue(APIError.notConnected.isTransient)
+        XCTAssertTrue(APIError.offline.isTransient)
+        XCTAssertTrue(APIError.serverUnavailable.isTransient)
         XCTAssertTrue(APIError.timedOut.isTransient)
+    }
+
+    /// A wrong address never becomes right by retrying, so polling through it
+    /// would just make the app look hung instead of telling the user to fix it.
+    func testConfigurationErrorsAreNotTransient() {
+        XCTAssertFalse(APIError.notConfigured.isTransient)
+        XCTAssertFalse(APIError.hostNotFound.isTransient)
+        XCTAssertFalse(APIError.invalidURL.isTransient)
+    }
+
+    /// Each transport failure must say something different — the whole point of
+    /// separating them is that the user's next action differs.
+    func testTransportErrorsHaveDistinctMessages() {
+        let messages = [
+            APIError.notConfigured, .offline, .hostNotFound,
+            .serverUnavailable, .timedOut, .invalidURL
+        ].map(\.userMessage)
+        XCTAssertEqual(Set(messages).count, messages.count)
+        XCTAssertFalse(messages.contains(where: \.isEmpty))
     }
 
     func testStartPassesModeThroughToTheClient() async throws {
