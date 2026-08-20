@@ -17,6 +17,52 @@ _MIN_NAV_ENTRIES = 2
 _ACCEPTABLE_NOTE_LINK_RATIO = 0.5
 
 
+# A conversion the engine itself flags for review must not present as flawless.
+# The headline number is what a reader trusts, and it was computed before the
+# review findings existed and never revised: a book with eight dangling
+# reference markers and eighty-six unreadable passages still scored 100.0.
+_NEEDS_REVIEW_CEILING = 92.0
+# Per-defect deductions, each capped so one category cannot swamp the score.
+_MAX_UNMATCHED_PENALTY = 12.0
+_MAX_SUSPICIOUS_PENALTY = 10.0
+_MAX_UNLINKED_NOTE_PENALTY = 10.0
+
+
+def _apply_review_penalties(
+    score: float,
+    *,
+    build: BuildResult,
+    document: DocumentModel,
+    suspicious_passages: int,
+    needs_review: bool,
+) -> float:
+    """Bring the headline score into line with what the engine actually found.
+
+    Deductions are proportional to the size of the book, so ten dangling markers
+    matter more in a pamphlet than in a five-hundred-page reference work.
+    """
+    pages = max(1, document.analysis.page_count)
+
+    if build.unmatched_marker_count:
+        share = build.unmatched_marker_count / pages
+        score -= min(_MAX_UNMATCHED_PENALTY, share * 100.0)
+
+    if suspicious_passages:
+        share = suspicious_passages / pages
+        score -= min(_MAX_SUSPICIOUS_PENALTY, share * 20.0)
+
+    total_notes = build.footnote_count + build.endnote_count
+    linked = build.footnote_linked_count + build.endnote_linked_count
+    if total_notes and linked < total_notes:
+        unlinked_share = (total_notes - linked) / total_notes
+        score -= min(_MAX_UNLINKED_NOTE_PENALTY, unlinked_share * _MAX_UNLINKED_NOTE_PENALTY)
+
+    if needs_review:
+        score = min(score, _NEEDS_REVIEW_CEILING)
+
+    return round(max(0.0, min(score, 100.0)), 1)
+
+
 def assess_structure(
     document: DocumentModel,
     build: BuildResult,
@@ -158,6 +204,14 @@ def compute_quality_report(
             f"{repair.rejected_count - suspicious} possible text correction(s) were not applied "
             "because the evidence was ambiguous"
         )
+
+    quality_score = _apply_review_penalties(
+        quality_score,
+        build=build,
+        document=document,
+        suspicious_passages=suspicious,
+        needs_review=bool(review_reasons),
+    )
 
     return QualityReport(
         title=document.metadata.get("title"),

@@ -41,11 +41,6 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         # A physical device reaches the development backend over the local
@@ -68,7 +63,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pdftoepub.app
-        TARGETED_DEVICE_FAMILY: "1,2"
+        # iPhone only. iPad was enabled by default but no iPad layout work was
+        # ever done and no iPad test has ever run, so shipping it would mean
+        # submitting a stretched iPhone UI — a common rejection under
+        # Guideline 4.0 — and would additionally require a separate set of iPad
+        # screenshots. Re-enable as "1,2" once the layout is actually designed
+        # and tested for a large screen.
+        TARGETED_DEVICE_FAMILY: "1"
         ENABLE_PREVIEWS: true
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:

@@ -21,6 +21,55 @@ _DIVISION_RE = re.compile(
 )
 # "1", "12.", "IV", "XIV." — a division number standing on its own.
 _BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,3}|[IVXLCDM]{1,7})\s*[.\)]?\s*$", re.IGNORECASE)
+
+# Words a book uses to name a division, in the languages this pipeline targets.
+# "BÖLÜM 3" on its own line is the same construct as a bare "3": the number of
+# the chapter whose title follows on the next line.
+_DIVISION_WORDS = r"B\u00d6L\u00dcM|BOLUM|KISIM|CHAPTER|PART|SECTION|K\u0130TAP|KITAP"
+_DIVISION_HEADING_RE = re.compile(
+    rf"^\s*(?:(?:{_DIVISION_WORDS})\s*[:.\-]?\s*(?:\d{{1,3}}|[IVXLCDM]{{1,7}})"
+    rf"|(?:\d{{1,3}}|[IVXLCDM]{{1,7}})\s*[.\-]?\s*(?:{_DIVISION_WORDS}))\s*[.:\)]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_division_label(text: str) -> bool:
+    """True for a line that names a division and nothing else — "3", "BÖLÜM 3"."""
+    collapsed = " ".join(text.split())
+    return bool(
+        _BARE_NUMBER_RE.match(collapsed) or _DIVISION_HEADING_RE.match(collapsed)
+    )
+
+
+_SUBSECTION_RE = re.compile(r"^\s*\d{1,3}\.\d{1,3}")
+
+
+def is_subsection_heading(text: str) -> bool:
+    """True for "1.2. Literatür Taraması" — a section inside a chapter.
+
+    A dotted number says explicitly that this sits beneath something else, so it
+    must not open a chapter file however large it is set.
+    """
+    return bool(_SUBSECTION_RE.match(" ".join(text.split())))
+
+
+def is_division_heading(text: str) -> bool:
+    """True when a heading opens a division, with or without its title attached.
+
+    "BÖLÜM 3" and "BÖLÜM 3 VERİ YAPILARI" both qualify; "1.2. Literatür" does
+    not — a dotted section number is a subsection, not a chapter.
+    """
+    collapsed = " ".join(text.split())
+    if _DIVISION_HEADING_RE.match(collapsed):
+        return True
+    return bool(
+        re.match(
+            rf"^\s*(?:{_DIVISION_WORDS})\s*[:.\-]?\s*"
+            rf"(?:\d{{1,3}}|[IVXLCDM]{{1,7}})\b",
+            collapsed,
+            re.IGNORECASE,
+        )
+    )
 # "1. Kurban", "Chapter 3 — Beginnings"
 _NUMBERED_TITLE_RE = re.compile(
     r"^\s*(?:(?:%s)\s+)?(\d{1,3}|[IVXLCDM]{1,7})\s*[.\):—–-]\s*\S"
@@ -217,8 +266,8 @@ def merge_division_numbers(nodes: list[StructuralNode]) -> int:
             and nxt is not None
             and nxt.role == BlockRole.HEADING
             and node.page == nxt.page
-            and _BARE_NUMBER_RE.match(_text_of_node(node))
-            and not _BARE_NUMBER_RE.match(_text_of_node(nxt))
+            and is_division_label(_text_of_node(node))
+            and not is_division_label(_text_of_node(nxt))
         ):
             # Joined with a space, never with invented punctuation: the source
             # set "1" above "Kurban" with no full stop, and adding one would put

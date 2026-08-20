@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from app.pipeline import headings as headings_module
 from app.models.document import BlockRole, DocumentModel, StructuralNode, TableData, TextDirection
 from app.pipeline.epub.css import DEFAULT_STYLESHEET
 from app.pipeline.epub.render import footnote_anchor_id, render_inline
@@ -54,6 +55,24 @@ def slugify(text: str, fallback: str) -> str:
 
 
 _MIN_CHAPTERS_FOR_USEFUL_NAV = 2
+# Beyond roughly this many pages, a single "chapter" is not a chapter — it is a
+# whole book in one file. Used to reject a split level that technically produces
+# two divisions but leaves the reader with no navigation.
+_MAX_PAGES_PER_CHAPTER = 60
+
+
+def _division_headings(nodes: list[StructuralNode]) -> list[StructuralNode]:
+    """Headings that explicitly name a division — "BÖLÜM 3", "CHAPTER 2"."""
+    return [
+        n
+        for n in nodes
+        if n.role == _HEADING_SPLIT_ROLE and headings_module.is_division_heading(n.text)
+    ]
+
+
+def _page_span(nodes: list[StructuralNode]) -> int:
+    pages = [n.page for n in nodes if n.page]
+    return (max(pages) - min(pages) + 1) if pages else 1
 
 
 def _choose_split_level(nodes: list[StructuralNode]) -> int | None:
@@ -63,6 +82,11 @@ def _choose_split_level(nodes: list[StructuralNode]) -> int | None:
     largest scale in a book, so splitting strictly on level 1 yields a single
     chapter containing the entire text. The shallowest level that actually
     produces several divisions is the one a reader would recognise as chapters.
+
+    "Several" alone is not enough either. A title set across two lines counts as
+    two level-1 headings, which satisfied the old rule and collapsed a 168-page
+    book into two files with forty chapter headings buried inside them. A level
+    only qualifies if the divisions it produces are chapter-sized.
     """
     counts: dict[int, int] = {}
     for node in nodes:
@@ -71,12 +95,20 @@ def _choose_split_level(nodes: list[StructuralNode]) -> int | None:
     if not counts:
         return None
 
+    total_pages = _page_span(nodes)
     cumulative = 0
+    fallback: int | None = None
     for level in sorted(counts):
         cumulative += counts[level]
-        if cumulative >= _MIN_CHAPTERS_FOR_USEFUL_NAV:
+        if cumulative < _MIN_CHAPTERS_FOR_USEFUL_NAV:
+            continue
+        if fallback is None:
+            fallback = level
+        if total_pages / cumulative <= _MAX_PAGES_PER_CHAPTER:
             return level
-    return min(counts)
+    # Nothing gives chapter-sized divisions; the shallowest usable level is
+    # still better than one file for the whole book.
+    return fallback if fallback is not None else min(counts)
 
 
 def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
@@ -85,7 +117,21 @@ def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
     Uses the top-most heading level actually present as the chapter boundary:
     level 1 if any exist, else level 2, else the whole book is one chapter.
     """
-    split_level = _choose_split_level(nodes)
+    # A book that labels its own divisions has told us which typographic level
+    # its chapters live at. Split on that level rather than on the labelled
+    # headings alone: books mix styles, setting "BÖLÜM 2" on one chapter and
+    # "3" above a title on the next, and splitting only on the labelled ones
+    # buries every chapter set in the other style inside its predecessor.
+    #
+    # Headings numbered like "1.2." are excluded whatever their size — a dotted
+    # number says the heading sits beneath something else.
+    division_nodes = _division_headings(nodes)
+    chapter_level: int | None = None
+    if len(division_nodes) >= _MIN_CHAPTERS_FOR_USEFUL_NAV:
+        levels = [n.level for n in division_nodes if n.level]
+        if levels:
+            chapter_level = max(set(levels), key=levels.count)
+    split_level = _choose_split_level(nodes) if chapter_level is None else None
 
     chapters: list[Chapter] = []
     current: Chapter | None = None
@@ -95,11 +141,19 @@ def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
         # A collected notes section is a major division of the book and must be
         # reachable from the table of contents, so it opens a chapter of its own
         # regardless of the heading level its typography implied.
-        starts_chapter = node.role == BlockRole.ENDNOTE_SECTION_HEADING or (
-            split_level is not None
-            and node.role == _HEADING_SPLIT_ROLE
-            and (node.level or 99) <= split_level
-        )
+        if chapter_level is not None:
+            opens_division = (
+                node.role == _HEADING_SPLIT_ROLE
+                and (node.level or 99) <= chapter_level
+                and not headings_module.is_subsection_heading(node.text)
+            )
+        else:
+            opens_division = (
+                split_level is not None
+                and node.role == _HEADING_SPLIT_ROLE
+                and (node.level or 99) <= split_level
+            )
+        starts_chapter = node.role == BlockRole.ENDNOTE_SECTION_HEADING or opens_division
         if starts_chapter:
             if current is None and front_matter:
                 chapters.append(Chapter(filename="", title="Front Matter", nodes=front_matter))
