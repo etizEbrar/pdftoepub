@@ -205,8 +205,15 @@ def merge_division_numbers(nodes: list[StructuralNode]) -> int:
         node = nodes[index]
         nxt = nodes[index + 1] if index + 1 < len(nodes) else None
 
+        # The number is frequently set no larger than the body text, so it
+        # scores as an ordinary paragraph rather than a heading. Requiring both
+        # sides to be headings left it stranded as a stray "<p>1</p>" at the
+        # foot of the previous chapter, and the navigation entry read "Kurban"
+        # three times over with nothing to tell the chapters apart. A lone
+        # numeral immediately above a heading on the same page is that
+        # heading's number whichever role it was given.
         if (
-            node.role == BlockRole.HEADING
+            node.role in (BlockRole.HEADING, BlockRole.PARAGRAPH)
             and nxt is not None
             and nxt.role == BlockRole.HEADING
             and node.page == nxt.page

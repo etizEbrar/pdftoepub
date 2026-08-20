@@ -10,6 +10,9 @@ BULLET_RE = re.compile(r"^[•●○◦▪‣–\-\*]\s+")
 NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
 # A note body opens with its marker; unlike NUMBERED_RE the separator is
 # optional, since footnotes are commonly set as "1 Text" with no punctuation.
+# An extract is usually set a point or two down from the body; more than this
+# and it is note-sized rather than quote-sized.
+_QUOTE_MAX_SIZE_RATIO = 0.96
 NOTE_ENTRY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S")
 TERMINAL_PUNCT = ".!?\"”’:;»)]"
 
@@ -101,6 +104,18 @@ def _first_line(text: str) -> str:
 _FOOTNOTE_CLEAR_SIZE_RATIO = 0.75
 _FOOTNOTE_MAX_SIZE_RATIO = 0.90
 _FOOTNOTE_PAGE_FRACTION = 0.66
+
+
+def _is_smaller_than_body(block, body_size: float) -> bool:
+    """Set noticeably smaller than the body text.
+
+    The margin matters: extraction jitters font sizes by a fraction of a point,
+    and treating that as a deliberate size change would turn ordinary indented
+    paragraphs into block quotes.
+    """
+    if not body_size or not block.font_size:
+        return False
+    return block.font_size <= body_size * _QUOTE_MAX_SIZE_RATIO
 
 
 def _looks_like_footnote_body(
@@ -226,6 +241,31 @@ def classify_blocks(
             level = _heading_level(size_ratio)
             confidence = heading_evidence.confidence
             evidence = heading_evidence.signals
+        elif _looks_like_footnote_body(b, body_size, b.page in pages_with_body_text):
+            # Checked before the bullet rule: a note opening "* " or "- " also
+            # matches BULLET_RE, and losing that contest turned footnotes into
+            # list items with their markers eaten as bullets.
+            #
+            # Several notes stacked in the footnote area are usually merged into
+            # one block. When every line opens with its own marker they are
+            # distinct notes, and must be split or they'd all link to whichever
+            # marker happened to come first.
+            raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            if len(raw_lines) > 1 and all(NOTE_ENTRY_RE.match(ln) for ln in raw_lines):
+                for li, line in enumerate(raw_lines):
+                    nodes.append(
+                        StructuralNode(
+                            node_id=f"n_{b.block_id}_{li}",
+                            role=BlockRole.FOOTNOTE,
+                            text=line,
+                            confidence=0.7,
+                            source_block_ids=[b.block_id],
+                            page=b.page,
+                        )
+                    )
+                continue
+            role = BlockRole.FOOTNOTE
+            confidence = 0.6  # refined by footnotes.py, which owns final footnote linking
         elif BULLET_RE.match(first_line) or NUMBERED_RE.match(first_line):
             # PyMuPDF sometimes groups several adjacent bulleted/numbered lines
             # into one block when the vertical gap between them is small. If
@@ -250,30 +290,13 @@ def classify_blocks(
                 continue
             role = BlockRole.LIST_ITEM
             confidence = 0.85
-        elif indented and b.italic:
+        elif indented and (b.italic or _is_smaller_than_body(b, body_size)):
+            # Italics are one way to mark an extract; a smaller measure set
+            # in from the margin is just as common and was being flattened
+            # into ordinary prose. The footnote test above already claimed
+            # small type at the foot of the page, so this cannot steal notes.
             role = BlockRole.QUOTE
-            confidence = 0.7
-        elif _looks_like_footnote_body(b, body_size, b.page in pages_with_body_text):
-            # Several notes stacked in the footnote area are usually merged into
-            # one block. When every line opens with its own marker they are
-            # distinct notes, and must be split or they'd all link to whichever
-            # marker happened to come first.
-            raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            if len(raw_lines) > 1 and all(NOTE_ENTRY_RE.match(ln) for ln in raw_lines):
-                for li, line in enumerate(raw_lines):
-                    nodes.append(
-                        StructuralNode(
-                            node_id=f"n_{b.block_id}_{li}",
-                            role=BlockRole.FOOTNOTE,
-                            text=line,
-                            confidence=0.7,
-                            source_block_ids=[b.block_id],
-                            page=b.page,
-                        )
-                    )
-                continue
-            role = BlockRole.FOOTNOTE
-            confidence = 0.6  # refined by footnotes.py, which owns final footnote linking
+            confidence = 0.7 if b.italic else 0.6
 
         nodes.append(
             StructuralNode(

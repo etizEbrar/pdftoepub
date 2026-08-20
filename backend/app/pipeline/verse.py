@@ -9,6 +9,19 @@ _SHORT_LINE_RATIO = 0.72
 _MIN_VERSE_LINES = 3
 _MIN_SHORT_LINE_SHARE = 0.75
 _RAGGED_RIGHT_MIN_STDEV_RATIO = 0.05
+# At least this share of lines must run on into the next without closing.
+#
+# Prose set narrow — dialogue, aphorisms, a run of short sentences — is short
+# and ragged exactly like verse, and those two signals alone were enough to
+# convert it. What separates them is that a poem's lines continue, while
+# consecutive prose sentences each stop. This was already measured and folded
+# into the confidence score, but nothing rejected on it, so ordinary paragraphs
+# became <br/>-separated verse.
+#
+# The cost is deliberate: fully end-stopped verse is left as prose. That keeps
+# the author's words intact and merely loses line breaks, where the opposite
+# error rewrites prose into something the author never set.
+_MIN_ENJAMBMENT_SHARE = 0.25
 # Consecutive verse lines sit about one leading apart; a bigger gap is a stanza
 # break, and a much bigger gap ends the poem.
 _MAX_LINE_GAP_FACTOR = 1.9
@@ -76,9 +89,11 @@ def _looks_like_verse_run(
     if stdev_ratio < _RAGGED_RIGHT_MIN_STDEV_RATIO:
         return False, 0.0  # a straight right edge means it's a justified block
 
-    # Some enjambment: a run where every line closes a sentence is a list.
+    # Some enjambment: a run where every line closes a sentence is prose.
     enjambed = sum(1 for _, _, text in lines[:-1] if text and text[-1] not in _SENTENCE_END)
     enjambment_share = enjambed / max(1, len(lines) - 1)
+    if enjambment_share < _MIN_ENJAMBMENT_SHARE:
+        return False, 0.0
 
     confidence = (
         0.35

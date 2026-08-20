@@ -497,25 +497,71 @@ def build_mixed_direction_document(path: Path) -> Path:
 # L. Large native-text book (performance: must never trigger OCR)
 # --------------------------------------------------------------------------
 
+# Sentences of differing length, so lines wrap at varying points and paragraphs
+# end mid-measure the way real prose does.
+_LONG_BOOK_SENTENCES = [
+    "The road bent south of the river and the carts went with it every morning.",
+    "Nobody counted them. There was no reason to and no one who would have asked.",
+    "By the time the mist lifted the far bank had already begun its ordinary work,",
+    "and the sound of it carried across the water in a way that felt much closer",
+    "than it was. He stopped once, listened, and then went on without looking back.",
+]
+
+
 def build_large_book(path: Path, pages: int = 520) -> Path:
-    """A long, purely native-text book. Used to prove a big book stays
-    deterministic and never pays for OCR."""
+    """A long, purely native-text book.
+
+    Proves a big book stays deterministic and never pays for OCR — but also
+    that reconstruction holds up over hundreds of pages. The earlier version
+    put 28 identical, self-contained lines on every page, which meant paragraph
+    merging, hyphenation repair and chapter detection were never exercised at
+    scale: there was not a single paragraph boundary in 520 pages.
+    """
     doc = fitz.open()
+    chapter_len = 40
     for page_index in range(pages):
         page = doc.new_page(width=PAGE_W, height=PAGE_H)
-        page.insert_text((PAGE_W / 2 - 60, 40), "The Long Book", fontsize=9)
-        if page_index % 40 == 0:
-            page.insert_text((72, 100), f"Chapter {page_index // 40 + 1}", fontsize=20)
+
+        # Alternating running heads plus a page number, as a printed book sets
+        # them — and as the furniture stripper must remove them.
+        head = "The Long Book" if page_index % 2 else "A. Novelist"
+        page.insert_text((PAGE_W / 2 - 60, 40), head, fontsize=9)
+        page.insert_text((PAGE_W / 2, PAGE_H - 40), str(page_index + 1), fontsize=9)
+
+        if page_index % chapter_len == 0:
+            page.insert_text((72, 100), f"Chapter {page_index // chapter_len + 1}", fontsize=20)
             y = 150
         else:
             y = 100
-        for line in range(28):
-            page.insert_text(
-                (72, y + line * 16),
-                f"Page {page_index + 1} line {line + 1}: ordinary body text for the long book.",
-                fontsize=10,
-            )
-        page.insert_text((PAGE_W / 2, PAGE_H - 40), str(page_index + 1), fontsize=9)
+
+        line_no = 0
+        paragraph = 0
+        while line_no < 28:
+            # Paragraphs of 4-6 lines, first line indented, no blank line
+            # between them: indentation is the only boundary signal.
+            length = 4 + (page_index + paragraph) % 3
+            carry = ""
+            for i in range(length):
+                if line_no >= 28:
+                    break
+                sentence = _LONG_BOOK_SENTENCES[
+                    (page_index + paragraph + i) % len(_LONG_BOOK_SENTENCES)
+                ]
+                if carry:
+                    # Lowercase remainder of the word broken on the line above.
+                    sentence = carry + " " + sentence[0].lower() + sentence[1:]
+                    carry = ""
+                # Break a real word across the line end every third line, the
+                # way justified setting does. The continuation is lowercase, so
+                # rejoining it is safe; a capitalised next line would mean a new
+                # sentence and must NOT be joined.
+                if i and i % 3 == 0 and i + 1 < length and line_no + 1 < 28:
+                    sentence = sentence.rsplit(" ", 1)[0] + " morn-"
+                    carry = "ing"
+                x = 90 if i == 0 else 72
+                page.insert_text((x, y + line_no * 16), sentence, fontsize=10)
+                line_no += 1
+            paragraph += 1
     doc.save(str(path))
     doc.close()
     return path
@@ -762,6 +808,146 @@ def build_turkish_ocr_novel(path: Path, pages: int = 30) -> Path:
     return path
 
 
+
+
+# --------------------------------------------------------------------------
+# P. A realistically typeset Turkish book
+#
+# The other fixtures test one structural feature each on a clean page. Real
+# books apply many at once, and it is the *combination* that breaks
+# reconstruction. This one deliberately packs the hazards that a professionally
+# typeset paperback actually contains:
+#
+#   - justified body text with hyphenated line breaks (real hyphens, not soft)
+#   - first-line indentation as the only paragraph signal, with no blank line
+#   - author-intentional punctuation that must survive verbatim: "…", "...",
+#     ". . .", en/em dashes, Turkish quote marks, apostrophes
+#   - ligature codepoints (ﬁ, ﬂ) as a real typesetter emits them
+#   - block quotes set narrower and slightly smaller than body text
+#   - scene breaks marked by a centred ornament
+#   - front matter (half-title, copyright) that is not a chapter
+#   - two chapter-heading styles: a numeral line above a title, and a plain
+#     numbered form
+#   - alternating verso/recto running heads plus page numbers
+#   - footnotes with symbol markers (*, †) as well as numeric ones
+# --------------------------------------------------------------------------
+
+_HARD_BODY = [
+    "Sabahın ilk saatlerinde sokaklar bomboştu ve rüzgâr pencerelerin önün-",
+    "den usulca geçiyordu. Uzakta bir kapı kapandı, sonra sessizlik yeniden",
+    "yerleşti. Kimse acele etmiyordu bu saatte; kimse konuşmuyordu da.",
+]
+
+_HARD_QUOTE = [
+    "Şehir, kendini hatırlamayanların şehridir," ,
+    "demişti yaşlı adam, kimse dinlemezken.",
+]
+
+
+def build_hard_typeset_book(path: Path, chapters: int = 6) -> Path:
+    """A book that looks the way a real one is set, not the way a fixture is."""
+    font = _ensure_unicode_font()
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    title = "Sisin Ardındaki Şehir"
+    author = "Ayşe Yılmaz"
+    c.setTitle(title)
+    c.setAuthor(author)
+
+    left = 1.1 * inch
+    right = PAGE_W - 1.1 * inch
+    indent = left + 0.25 * inch
+
+    # ---- front matter: must not become chapters ----
+    c.setFont(font, 22)
+    c.drawCentredString(PAGE_W / 2, PAGE_H - 3 * inch, title)
+    c.setFont(font, 12)
+    c.drawCentredString(PAGE_W / 2, PAGE_H - 3.6 * inch, author)
+    c.showPage()
+
+    c.setFont(font, 9)
+    c.drawString(left, PAGE_H - 3 * inch, "© 2024 Ayşe Yılmaz")
+    c.drawString(left, PAGE_H - 3.2 * inch, "Tüm hakları saklıdır.")
+    c.drawString(left, PAGE_H - 3.4 * inch, "Birinci baskı: Mart 2024")
+    c.showPage()
+
+    page_num = 1
+    for ch in range(1, chapters + 1):
+        # Alternating heading styles, as books actually do between parts.
+        y = PAGE_H - 1.6 * inch
+        if ch % 2 == 1:
+            c.setFont(font, 11)
+            c.drawCentredString(PAGE_W / 2, y, str(ch))
+            y -= 0.42 * inch
+            c.setFont(font, 18)
+            c.drawCentredString(PAGE_W / 2, y, "Sisin İçinden")
+        else:
+            c.setFont(font, 18)
+            c.drawCentredString(PAGE_W / 2, y, f"BÖLÜM {ch}")
+        y -= 0.55 * inch
+
+        for page_in_chapter in range(2):
+            if page_in_chapter > 0:
+                y = PAGE_H - 1.3 * inch
+            # Running head: verso carries the author, recto the title.
+            c.setFont(font, 8)
+            if page_num % 2 == 0:
+                c.drawCentredString(PAGE_W / 2, PAGE_H - 0.62 * inch, author.upper())
+            else:
+                c.drawCentredString(PAGE_W / 2, PAGE_H - 0.62 * inch, title.upper())
+            c.drawCentredString(PAGE_W / 2, 0.62 * inch, str(page_num))
+
+            c.setFont(font, 11)
+            for para in range(3):
+                for i, line in enumerate(_HARD_BODY):
+                    x = indent if i == 0 else left
+                    c.drawString(x, y, line)
+                    y -= 0.235 * inch
+                # No blank line between paragraphs — indentation is the only
+                # signal, exactly as in a printed novel.
+
+            # Author-intentional punctuation, three different forms.
+            c.drawString(indent, y, "Bir şey söyleyecekti… ama vazgeçti.")
+            y -= 0.235 * inch
+            c.drawString(left, y, "Sonra durdu... ve bekledi.")
+            y -= 0.235 * inch
+            c.drawString(left, y, "Uzun bir sessizlik. . . kimse konuşmadı.")
+            y -= 0.235 * inch
+            c.drawString(left, y, "“Gitmeliyiz,” dedi — sesi titriyordu.")
+            y -= 0.235 * inch
+            c.drawString(left, y, "Sayfa 12–14 arası okunmalı; oﬃs ve ﬂama sözcükleri.")
+            y -= 0.3 * inch
+
+            # Centred ornament: a scene break, not a heading.
+            c.drawCentredString(PAGE_W / 2, y, "* * *")
+            y -= 0.35 * inch
+
+            # Block quote: narrower measure, smaller type.
+            c.setFont(font, 10)
+            for line in _HARD_QUOTE:
+                c.drawString(left + 0.4 * inch, y, line)
+                y -= 0.22 * inch
+            c.setFont(font, 11)
+            y -= 0.15 * inch
+
+            if page_in_chapter == 0 and ch == 1:
+                # Footnote with a symbol marker rather than a number.
+                c.drawString(left, y, "Bu satır bir dipnota atıfta bulunur")
+                c.setFont(font, 7)
+                c.drawString(left + 2.55 * inch, y + 0.05 * inch, "*")
+                c.setFont(font, 11)
+                c.drawString(left + 2.65 * inch, y, "ve devam eder.")
+                y -= 0.235 * inch
+                c.setFont(font, 8)
+                c.drawString(left, 0.95 * inch, "* Yazarın notu: bu bir açıklamadır.")
+                c.setFont(font, 11)
+
+            page_num += 1
+            c.showPage()
+
+    c.save()
+    return path
+
+
 BUILDERS = {
     "turkish_novel": build_turkish_novel,
     "two_column_academic": build_two_column_academic,
@@ -774,6 +960,7 @@ BUILDERS = {
     "poetry_document": build_poetry_document,
     "rtl_document": build_rtl_document,
     "mixed_direction": build_mixed_direction_document,
+    "hard_typeset_book": build_hard_typeset_book,
 }
 
 
@@ -791,3 +978,5 @@ if __name__ == "__main__":
     out = Path(__file__).parent / "corpus"
     for name, target in build_all(out).items():
         print(f"wrote {name}: {target.stat().st_size} bytes")
+
+

@@ -289,3 +289,110 @@ def test_mixed_direction_document_preserves_logical_character_order(corpus_dir: 
     assert "This paragraph is written in English" in xhtml
     # The RTL run is marked explicitly inside an otherwise-LTR document.
     assert 'dir="rtl"' in xhtml
+
+
+# --- P. A realistically typeset book --------------------------------------
+#
+# Many hazards at once, which is what real books do and what the single-feature
+# fixtures above never exercise together. Every assertion here corresponds to a
+# defect found by reading the generated XHTML, not by watching a metric.
+
+
+@pytest.fixture(scope="module")
+def hard_book(tmp_path_factory) -> tuple[QualityReport, str, str]:
+    pdf = corpus.build_hard_typeset_book(
+        tmp_path_factory.mktemp("hard") / "hard_typeset_book.pdf"
+    )
+    job = _convert("corpustest-hard", pdf)
+    report = _report(job)
+    body = _read_all_xhtml(job)
+    with zipfile.ZipFile(job.epub_path) as zf:
+        nav = next(
+            zf.read(n).decode("utf-8") for n in zf.namelist() if n.endswith("nav.xhtml")
+        )
+    return report, body, nav
+
+
+def test_hard_book_keeps_prose_as_prose(hard_book):
+    """Short end-stopped sentences must not be re-set as verse."""
+    report, _, _ = hard_book
+    assert report.verse_count == 0, "ordinary prose was converted into poetry"
+
+
+def test_hard_book_preserves_every_ellipsis_form_verbatim(hard_book):
+    """The author set three different ellipses; all three are their words."""
+    _, body, _ = hard_book
+    assert "\u2026" in body, "the single-character ellipsis was lost"
+    assert "..." in body, "three periods were rewritten to a single character"
+    assert ". . ." in body, "the spaced ellipsis was collapsed"
+
+
+def test_hard_book_preserves_dashes_and_turkish_quotes(hard_book):
+    _, body, _ = hard_book
+    assert "\u2014" in body and "\u2013" in body, "dashes were normalised away"
+    assert "\u201c" in body and "\u201d" in body, "quotation marks were altered"
+
+
+def test_hard_book_repairs_line_end_hyphenation(hard_book):
+    """A hyphen at a line break is the typesetter's, not the author's."""
+    _, body, _ = hard_book
+    assert "\u00f6n\u00fcnden" in body
+    assert "\u00f6n\u00fcn-" not in body
+
+
+def test_hard_book_expands_ligatures(hard_book):
+    """Ligature codepoints break search and text-to-speech."""
+    _, body, _ = hard_book
+    assert "offis" in body and "flama" in body
+    assert "\ufb03" not in body and "\ufb02" not in body
+
+
+def test_hard_book_numbers_its_chapters_in_the_navigation(hard_book):
+    """Three chapters share a title; without their numbers the TOC is useless."""
+    _, _, nav = hard_book
+    assert "1 Sisin \u0130\u00e7inden" in nav, f"chapter number missing: {nav}"
+    assert "B\u00d6L\u00dcM 2" in nav
+
+
+def test_hard_book_does_not_strand_chapter_numbers_as_paragraphs(hard_book):
+    _, body, _ = hard_book
+    assert "<p>1</p>" not in body, "chapter number left as a stray paragraph"
+    assert "<p>3</p>" not in body
+
+
+def test_hard_book_links_a_symbol_marked_footnote(hard_book):
+    """A "*" note must survive as a note, not become a bullet point."""
+    report, body, _ = hard_book
+    assert report.footnote_count >= 1, "the symbol-marked note was lost"
+    assert report.footnotes_linked >= 1, "the note body was never linked"
+    assert 'epub:type="footnote"' in body
+    assert "Yazar\u0131n notu" in body
+    assert "<li>Yazar\u0131n notu" not in body, "the note became a list item"
+
+
+def test_hard_book_keeps_an_extract_as_one_blockquote(hard_book):
+    """A wrapped extract is one quotation, not one per line."""
+    _, body, _ = hard_book
+    assert "<blockquote>" in body
+    assert (
+        "\u015eehir, kendini hat\u0131rlamayanlar\u0131n \u015fehridir, "
+        "demi\u015fti ya\u015fl\u0131 adam"
+    ) in body, "the extract was split across separate blockquotes"
+
+
+def test_hard_book_marks_scene_breaks(hard_book):
+    """"* * *" is an ornament, not a heading and not content."""
+    _, body, _ = hard_book
+    assert 'class="scene-break"' in body
+
+
+def test_hard_book_strips_running_heads(hard_book):
+    _, body, _ = hard_book
+    assert "AY\u015eE YILMAZ" not in body, "the running head leaked into the text"
+
+
+def test_hard_book_is_valid_and_fully_local(hard_book):
+    report, _, _ = hard_book
+    assert report.epubcheck_passed
+    assert report.ai_provider_used == "none"
+    assert report.ocr_page_count == 0, "a native-text book paid for OCR"

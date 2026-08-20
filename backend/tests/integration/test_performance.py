@@ -91,3 +91,61 @@ def test_large_book_converts_without_ocr_or_rasterization(large_book: Path):
         assert elapsed < 240, f"conversion of {LARGE_BOOK_PAGES} pages took {elapsed:.0f}s"
     finally:
         shutil.rmtree(settings.jobs_dir / job_id, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Reconstruction quality has to hold at book length, not just on a short
+# fixture. The earlier long-book fixture put 28 self-contained lines on every
+# page, so paragraph merging, hyphenation repair and furniture stripping were
+# never exercised at scale — there was not one paragraph boundary in 520 pages.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not epubcheck_available(), reason="epubcheck is not installed")
+def test_long_book_reconstruction_holds_at_scale(large_book: Path):
+    import zipfile
+
+    job_id = "perf-quality-large"
+    job = Job(
+        job_id=job_id,
+        source_filename=large_book.name,
+        mode=ConversionMode.MAXIMUM_ACCURACY,
+        upload_path=str(large_book),
+    )
+    store.save_job(job)
+    try:
+        from app.pipeline.orchestrator import _run_pipeline_sync
+
+        _run_pipeline_sync(job)
+        finished = store.get_job(job_id)
+        assert finished is not None and finished.stage == JobStage.COMPLETED
+        report = finished.quality_report
+        assert report is not None
+
+        with zipfile.ZipFile(finished.epub_path) as zf:
+            body = "\n".join(
+                zf.read(n).decode("utf-8")
+                for n in zf.namelist()
+                if n.endswith(".xhtml")
+            )
+
+        # Every hyphenated line break has a lowercase continuation, so all of
+        # them are safe to rejoin. One left behind is a word split in half in
+        # the middle of the reader's page.
+        assert "morn-" not in body, "line-end hyphenation survived into the EPUB"
+        assert "morning" in body, "the rejoined word is missing entirely"
+
+        # Alternating running heads must not become body text.
+        assert "A. Novelist" not in body, "the verso running head leaked into the text"
+        assert "The Long Book" not in body, "the recto running head leaked into the text"
+
+        # A 520-page novel is not one paragraph, nor one per line.
+        assert report.paragraph_count > LARGE_BOOK_PAGES, (
+            f"only {report.paragraph_count} paragraphs in {LARGE_BOOK_PAGES} pages"
+        )
+        assert report.chapter_count >= 10, f"only {report.chapter_count} chapters"
+        assert report.ocr_page_count == 0, "a native-text book paid for OCR"
+        assert report.epubcheck_passed
+        assert report.ai_provider_used == "none"
+    finally:
+        store.delete_job(job_id)
