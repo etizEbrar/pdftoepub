@@ -113,7 +113,21 @@ final class ConversionFlowUITests: XCTestCase {
         // structure rather than by label: the browsing-mode tab bar's third tab
         // is always "Browse", and search finds the file without walking folders.
         let tabBar = app.tabBars["DOC.browsingModeTabBar"]
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 15), "document picker did not appear")
+        XCTAssertTrue(
+            tabBar.waitForExistence(timeout: 15),
+            """
+            The document picker did not appear.
+
+            This test needs a PDF the picker can reach. Reinstalling the app \
+            wipes its container, so place one and run again:
+
+              CONT=$(xcrun simctl get_app_container booted com.pdftoepub.app data)
+              cp backend/tests/fixtures/simple_book.pdf "$CONT/Documents/"
+
+            A backend must also be running on http://localhost:8000, or this \
+            test skips rather than failing.
+            """
+        )
         let browseTab = tabBar.buttons.element(boundBy: 2)
         XCTAssertTrue(browseTab.waitForExistence(timeout: 5), "browse tab not found")
         browseTab.tap()
