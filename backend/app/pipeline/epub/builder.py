@@ -13,6 +13,7 @@ from app.pipeline import headings as headings_module
 from app.models.document import BlockRole, DocumentModel, StructuralNode, TableData, TextDirection
 from app.pipeline.epub.css import DEFAULT_STYLESHEET
 from app.pipeline.epub.render import footnote_anchor_id, render_inline
+from app.pipeline.integrity import TEXT_BEARING_ROLES
 from app.pipeline.structure import BULLET_RE, NUMBERED_RE
 
 EXCLUDED_ROLES = {BlockRole.HEADER, BlockRole.FOOTER, BlockRole.PAGE_NUMBER}
@@ -682,16 +683,11 @@ def build_epub(
     image_count = sum(1 for n in renderable if n.role == BlockRole.IMAGE)
     list_item_count = sum(1 for n in renderable if n.role == BlockRole.LIST_ITEM)
     rtl_block_count = sum(1 for n in renderable if n.direction == TextDirection.RTL)
-    _content_roles = {
-        BlockRole.PARAGRAPH,
-        BlockRole.HEADING,
-        BlockRole.ENDNOTE_SECTION_HEADING,
-        BlockRole.QUOTE,
-        BlockRole.LIST_ITEM,
-        BlockRole.FOOTNOTE,
-        BlockRole.ENDNOTE,
-        BlockRole.VERSE,
-    }
+    # Must stay in step with integrity._TEXT_BEARING_ROLES. A role counted as
+    # expected there but not delivered here reads as lost content: captions were
+    # in one set and not the other, and a table fixture's integrity fell to 56%
+    # while every word was present in the file.
+    _content_roles = set(TEXT_BEARING_ROLES)
     word_count = sum(len(n.text.split()) for n in renderable if n.role in _content_roles)
 
     return BuildResult(

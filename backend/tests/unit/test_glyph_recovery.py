@@ -6,6 +6,8 @@ the reader as boxes or blanks.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.pipeline import footnotes
@@ -196,3 +198,28 @@ class TestAlternatingRunningHeads:
             for b in bs
             if b.block_id.endswith("_body") and b.block_id in furniture
         ]
+
+
+class TestWordAccountingIsConsistent:
+    """The set of roles counted as expected and as delivered must be the same.
+
+    A table fixture reported 56% integrity with every word present in the file:
+    captions counted toward expected words but not toward delivered ones,
+    because the builder kept its own copy of the role list and the two drifted.
+    """
+
+    def test_the_builder_counts_exactly_the_roles_integrity_expects(self):
+        import app.pipeline.epub.builder as builder
+        from app.pipeline.integrity import TEXT_BEARING_ROLES
+
+        source = Path(builder.__file__).read_text(encoding="utf-8")
+        assert "_content_roles = set(TEXT_BEARING_ROLES)" in source, (
+            "the builder has grown its own role list again; the two will drift"
+        )
+        assert TEXT_BEARING_ROLES, "the canonical role set is empty"
+
+    def test_captions_are_counted_as_delivered_text(self):
+        from app.models.document import BlockRole
+        from app.pipeline.integrity import TEXT_BEARING_ROLES
+
+        assert BlockRole.CAPTION in TEXT_BEARING_ROLES

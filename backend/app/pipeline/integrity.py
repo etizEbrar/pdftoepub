@@ -9,7 +9,10 @@ from app.models.document import BlockRole, DocumentModel
 _FURNITURE_ROLES = {BlockRole.HEADER, BlockRole.FOOTER, BlockRole.PAGE_NUMBER}
 
 # Roles whose text is genuinely carried into the EPUB as text.
-_TEXT_BEARING_ROLES = {
+#
+# The builder counts delivered words from this same set: if the two disagree, a
+# role counted as expected but not as delivered looks exactly like lost content.
+TEXT_BEARING_ROLES = {
     BlockRole.PARAGRAPH,
     BlockRole.HEADING,
     BlockRole.ENDNOTE_SECTION_HEADING,
@@ -94,7 +97,7 @@ def compute_integrity(document: DocumentModel, epub_word_count: int) -> Integrit
     accounted: set[str] = set()
     preserved_image_words = 0
     for node in document.nodes:
-        if node.role in _TEXT_BEARING_ROLES or node.role in _FURNITURE_ROLES:
+        if node.role in TEXT_BEARING_ROLES or node.role in _FURNITURE_ROLES:
             accounted.update(node.source_block_ids)
         elif node.role in _PRESERVED_NON_TEXT_ROLES:
             accounted.update(node.source_block_ids)

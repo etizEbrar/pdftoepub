@@ -63,12 +63,32 @@ def apply_tables(
     emitted: set[int] = set()
     result: list[StructuralNode] = []
 
+    # A table emits its caption inside <caption>, so a separate caption node
+    # holding the same words puts the line on the page twice.
+    table_captions = {
+        " ".join(t.data.caption.split()) for t in detected if t.data.caption
+    }
+
+    # Source blocks whose text a table has absorbed into its own <caption>.
+    # Recorded so the integrity account knows those words were delivered by the
+    # table rather than lost: the caption block sits outside the table's covered
+    # region, so nothing else would attribute it.
+    caption_block_ids: dict[str, list[str]] = {}
+
     for node in nodes:
         owning = next(
             (covered_to_table[bid] for bid in node.source_block_ids if bid in covered_to_table),
             None,
         )
         if owning is None:
+            caption_text = " ".join(node.text.split())
+            if node.role is BlockRole.CAPTION and caption_text in table_captions:
+                # The table renders this line inside <caption>; keeping the
+                # paragraph too would print it on the page twice.
+                caption_block_ids.setdefault(caption_text, []).extend(
+                    node.source_block_ids
+                )
+                continue
             result.append(node)
             continue
 
@@ -88,6 +108,10 @@ def apply_tables(
 
         if owning.data.confidence >= settings.table_min_confidence:
             table_node.text = owning.data.caption or ""
+            if owning.data.caption:
+                absorbed = caption_block_ids.get(" ".join(owning.data.caption.split()))
+                if absorbed:
+                    table_node.source_block_ids.extend(absorbed)
             semantic += 1
         else:
             page = pages.get(owning.page)
