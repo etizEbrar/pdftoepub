@@ -408,6 +408,9 @@ def render_chapter_body(
             parts.append(
                 f'<h{level} id="{xml_escape(node.node_id)}"{dir_attr}>{content}</h{level}>'
             )
+        elif node.role == BlockRole.CAPTION:
+            content = render_inline(node.text, resolve_note_href)
+            parts.append(f'<p class="caption"{dir_attr}>{content}</p>')
         elif node.role == BlockRole.QUOTE:
             content = render_inline(node.text, resolve_note_href)
             parts.append(f"<blockquote{dir_attr}><p>{content}</p></blockquote>")

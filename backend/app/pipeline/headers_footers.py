@@ -167,11 +167,18 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
                 confirmed_page_numbers.append(b)
                 continue
 
-            if _looks_like_note_body(b.text):
+            if band == "bottom" and _looks_like_note_body(b.text):
                 # Footnote bodies live in the bottom margin band and can repeat
                 # across pages ("Ibid.", a recurring source). Stripping them as
                 # a running footer would silently delete real content, so they
                 # are never eligible for furniture removal.
+                #
+                # Restricted to that band deliberately. A verso running head
+                # that opens with its page number — "25 | Book Title" — matches
+                # the note-body shape exactly, and protecting it here let the
+                # title bleed into the body text on all eighty-one verso pages
+                # while the recto form, "Book Title | 103", was stripped
+                # correctly. A footnote at the top of a page is not a thing.
                 continue
 
             key = (_normalize(b.text), band)

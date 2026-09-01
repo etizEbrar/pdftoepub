@@ -79,6 +79,15 @@ aside[epub|type~="footnote"] {
   border-left: 2px solid #ccc;
 }
 
+/* A label naming the figure or table it accompanies. */
+p.caption {
+  font-size: 0.9em;
+  font-style: italic;
+  text-align: center;
+  text-indent: 0;
+  margin: 0.4em 0 1em;
+}
+
 /* A note-shaped block that nothing in the text refers to. Set like a note, but
    an ordinary paragraph, so a reading system that hides unopened footnotes
    cannot make it unreachable. */

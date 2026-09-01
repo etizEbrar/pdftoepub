@@ -120,3 +120,79 @@ class TestUnreferencedNotesStayVisible:
             out = self._render(backrefs)
             assert "was living" in out, "note text lost"
             assert "7" in out, "note marker lost"
+
+
+class TestAlternatingRunningHeads:
+    """A verso head that opens with its page number is still a running head.
+
+    A real book set "25 | Book Title" on verso pages and "Book Title | 103" on
+    recto. The first shape matches the footnote-body pattern — a number followed
+    by several words — and the guard that stops real notes being stripped as
+    footers protected it too. The recto form was removed correctly while the
+    verso form bled into the body text on all eighty-one of its pages.
+    """
+
+    @staticmethod
+    def _book(page_count: int = 40):
+        from app.models.document import Block
+
+        def block(bid, page, text, y0, y1, size=9.0):
+            return Block(
+                block_id=bid, page=page, page_width=612, page_height=680,
+                bbox=(51, y0, 500, y1), kind="text", text=text, spans=[],
+                font="Helvetica", font_size=size,
+            )
+
+        pages = {}
+        for p in range(1, page_count + 1):
+            head = (
+                f"{p} | Yapay Zeka ve Makine Ogrenimi"
+                if p % 2 == 0
+                else f"Yapay Zeka ve Makine Ogrenimi | {p}"
+            )
+            pages[p] = [
+                block(f"p{p}_head", p, head, 37, 62),
+                block(f"p{p}_body", p, "Ordinary body prose for this page.", 200, 260, 11.0),
+                block(f"p{p}_note", p, "1 A real footnote body with words.", 640, 660, 8.0),
+            ]
+        return pages
+
+    def test_both_alternating_forms_are_stripped(self):
+        from app.pipeline.headers_footers import detect_furniture
+
+        pages = self._book()
+        furniture = detect_furniture(pages)
+        leaked = [
+            b.block_id
+            for bs in pages.values()
+            for b in bs
+            if b.block_id.endswith("_head") and b.block_id not in furniture
+        ]
+        assert not leaked, f"running heads leaked into the body: {leaked[:6]}"
+
+    def test_a_real_footnote_body_is_still_protected(self):
+        """The guard's original purpose must survive."""
+        from app.pipeline.headers_footers import detect_furniture
+
+        pages = self._book()
+        furniture = detect_furniture(pages)
+        notes = [
+            b.block_id
+            for bs in pages.values()
+            for b in bs
+            if b.block_id.endswith("_note")
+        ]
+        stripped = [n for n in notes if n in furniture]
+        assert not stripped, f"footnote bodies were removed as furniture: {stripped[:6]}"
+
+    def test_body_text_is_never_touched(self):
+        from app.pipeline.headers_footers import detect_furniture
+
+        pages = self._book()
+        furniture = detect_furniture(pages)
+        assert not [
+            b.block_id
+            for bs in pages.values()
+            for b in bs
+            if b.block_id.endswith("_body") and b.block_id in furniture
+        ]

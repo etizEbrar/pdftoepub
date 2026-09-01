@@ -13,6 +13,20 @@ NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
 # An extract is usually set a point or two down from the body; more than this
 # and it is note-sized rather than quote-sized.
 _QUOTE_MAX_SIZE_RATIO = 0.96
+# "Tablo 6: ...", "Şekil 8: ...", "Figure 2. ..." — a label naming the figure or
+# table it belongs to. Captions are set smaller and often indented, which is
+# exactly the shape of a block quote, so without this they were reconstructed as
+# quotations of the book by itself.
+_CAPTION_RE = re.compile(
+    r"^\s*(?:tablo|şekil|sekil|resim|grafik|çizelge|cizelge|figure|fig\.|table|chart|plate)"
+    r"\s*\d{1,3}\s*[:.\-–—]",
+    re.IGNORECASE,
+)
+
+
+def looks_like_caption(text: str) -> bool:
+    """True for a line that names the figure or table it accompanies."""
+    return bool(_CAPTION_RE.match(" ".join(text.split())))
 NOTE_ENTRY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S")
 TERMINAL_PUNCT = ".!?\"”’:;»)]"
 
@@ -290,6 +304,9 @@ def classify_blocks(
                 continue
             role = BlockRole.LIST_ITEM
             confidence = 0.85
+        elif looks_like_caption(first_line):
+            role = BlockRole.CAPTION
+            confidence = 0.8
         elif indented and (b.italic or _is_smaller_than_body(b, body_size)):
             # Italics are one way to mark an extract; a smaller measure set
             # in from the margin is just as common and was being flattened
