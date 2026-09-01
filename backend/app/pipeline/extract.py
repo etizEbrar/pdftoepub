@@ -55,16 +55,20 @@ def _group_fragments_into_visual_lines(raw_lines: list[dict]) -> list[list[dict]
     Fragments are merged only within a single MuPDF block, so this cannot join
     text across a column boundary: separate columns are separate blocks.
     """
+    # Sorted by vertical position so each fragment need only be compared with
+    # the group still open above it. Comparing against every group made this
+    # quadratic, which was invisible on a fixture and cost minutes per book on
+    # an OCR'd page carrying thousands of fragments.
+    ordered_input = sorted(
+        raw_lines, key=lambda ln: (ln.get("bbox") or (0, 0, 0, 0))[1]
+    )
     groups: list[list[dict]] = []
-    for line in raw_lines:
+    for line in ordered_input:
         bbox = line.get("bbox")
-        if not bbox:
-            groups.append([line])
-            continue
-        for group in groups:
-            if _vertically_overlaps(group[0].get("bbox", (0, 0, 0, 0)), bbox):
-                group.append(line)
-                break
+        if bbox and groups and _vertically_overlaps(
+            groups[-1][0].get("bbox", (0, 0, 0, 0)), bbox
+        ):
+            groups[-1].append(line)
         else:
             groups.append([line])
 

@@ -292,3 +292,68 @@ class TestSymbolMarkedFootnotes:
         assert all(n.role == BlockRole.LIST_ITEM for n in bullets), (
             f"bullets became {[n.role for n in bullets]}"
         )
+
+
+class TestVerseRequiresPositiveEvidence:
+    """Short ragged lines are not poetry by themselves.
+
+    A 392-page grammar reference produced 1,034 "poems": contents entries,
+    columns of exercise numbers, the cover subtitle and the copyright block.
+    All are short and ragged, and enjambment alone could not tell them apart
+    from verse. Each guard below rejects one of those shapes, always in the
+    direction of prose — leaving a poem as paragraphs keeps every word, while
+    re-setting a list as verse invents line breaks the author never wrote.
+    """
+
+    @staticmethod
+    def _run(lines: list[str]) -> list[Block]:
+        blocks = [
+            _line_block(f"v{i}", text, 72, 130 + i * 18, 60 + len(text) * 4.2)
+            for i, text in enumerate(lines)
+        ]
+        blocks.append(
+            _line_block(
+                "full",
+                "This closing paragraph is ordinary prose running to the margin.",
+                72, 130 + len(lines) * 18 + 24, 430,
+            )
+        )
+        return blocks
+
+    def _detect(self, lines: list[str]) -> int:
+        blocks = self._run(lines)
+        nodes = _nodes_for(blocks)
+        return detect_verse(nodes, {b.block_id: b for b in blocks})
+
+    def test_a_column_of_bare_numbers_is_not_verse(self):
+        assert self._detect(["1", "2", "3", "4", "5", "6"]) == 0
+
+    def test_a_table_of_contents_is_not_verse(self):
+        assert self._detect([
+            "Appendix 1 Regular and irregular verbs 292",
+            "Appendix 2 Present and past tenses 294",
+            "Appendix 3 The future 295",
+            "Appendix 4 Modal verbs 296",
+        ]) == 0
+
+    def test_a_numbered_exercise_list_is_not_verse(self):
+        assert self._detect([
+            "1 She is taking a picture",
+            "2 He is tying a shoelace",
+            "3 They are crossing the road",
+            "4 We are waiting outside",
+        ]) == 0
+
+    def test_a_run_of_two_word_fragments_is_not_verse(self):
+        assert self._detect([
+            "the road", "a shoelace", "the door", "some water"
+        ]) == 0
+
+    def test_real_verse_still_passes_every_guard(self):
+        """The guards must reject the impostors without rejecting poetry."""
+        assert self._detect([
+            "Because I could not stop for Death",
+            "He kindly stopped for me",
+            "The Carriage held but just Ourselves",
+            "And Immortality",
+        ]) == 1

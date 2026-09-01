@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import statistics
 
 from app.models.document import Block, BlockRole, StructuralNode
@@ -22,6 +23,20 @@ _RAGGED_RIGHT_MIN_STDEV_RATIO = 0.05
 # the author's words intact and merely loses line breaks, where the opposite
 # error rewrites prose into something the author never set.
 _MIN_ENJAMBMENT_SHARE = 0.25
+
+# Verse lines are phrases. Below this many words per line on average, the run is
+# a column of numbers or fragments — an exercise list, a numbered column, a
+# stack of labels — not poetry.
+_MIN_MEAN_WORDS_PER_LINE = 3.0
+# A line ending in a bare number is a contents entry pointing at a page. A run
+# mostly made of those is a table of contents.
+_MAX_PAGE_REFERENCE_SHARE = 0.3
+# A run whose lines mostly open with their own item number is a list.
+_MAX_ITEM_NUMBER_SHARE = 0.4
+
+_PAGE_REFERENCE_RE = re.compile(r"\d{1,4}\s*$")
+_ITEM_NUMBER_RE = re.compile(r"^\s*[\(\[]?\d{1,3}[\.\)\]]?\s")
+_BARE_NUMBER_LINE_RE = re.compile(r"^\s*[\(\[]?\d{1,4}[\.\)\]]?\s*$")
 # Consecutive verse lines sit about one leading apart; a bigger gap is a stanza
 # break, and a much bigger gap ends the poem.
 _MAX_LINE_GAP_FACTOR = 1.9
@@ -93,6 +108,29 @@ def _looks_like_verse_run(
     enjambed = sum(1 for _, _, text in lines[:-1] if text and text[-1] not in _SENTENCE_END)
     enjambment_share = enjambed / max(1, len(lines) - 1)
     if enjambment_share < _MIN_ENJAMBMENT_SHARE:
+        return False, 0.0
+
+    # Everything below rejects material that is short and ragged for reasons
+    # that have nothing to do with poetry. Each was found in a real book: a
+    # grammar reference produced a thousand "poems" made of contents entries,
+    # exercise numbers and cover matter. The bias is deliberately towards prose
+    # — leaving a poem as paragraphs keeps every word, while re-setting a list
+    # as verse invents line breaks the author never wrote.
+    texts = [text for _, _, text in lines]
+
+    if any(_BARE_NUMBER_LINE_RE.match(t) for t in texts):
+        return False, 0.0
+
+    mean_words = sum(len(t.split()) for t in texts) / len(texts)
+    if mean_words < _MIN_MEAN_WORDS_PER_LINE:
+        return False, 0.0
+
+    page_refs = sum(1 for t in texts if _PAGE_REFERENCE_RE.search(t))
+    if page_refs / len(texts) > _MAX_PAGE_REFERENCE_SHARE:
+        return False, 0.0
+
+    item_numbers = sum(1 for t in texts if _ITEM_NUMBER_RE.match(t))
+    if item_numbers / len(texts) > _MAX_ITEM_NUMBER_SHARE:
         return False, 0.0
 
     confidence = (
