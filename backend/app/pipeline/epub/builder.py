@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from app.pipeline import footnotes as footnotes_module
 from app.pipeline import headings as headings_module
 from app.models.document import BlockRole, DocumentModel, StructuralNode, TableData, TextDirection
 from app.pipeline.epub.css import DEFAULT_STYLESHEET
@@ -59,6 +60,12 @@ _MIN_CHAPTERS_FOR_USEFUL_NAV = 2
 # whole book in one file. Used to reject a split level that technically produces
 # two divisions but leaves the reader with no navigation.
 _MAX_PAGES_PER_CHAPTER = 60
+
+
+def _plain_title(text: str) -> str:
+    """A heading reduced to what a reader should see in a title or the TOC."""
+    cleaned = footnotes_module.strip_all_sentinels(text)
+    return " ".join(cleaned.split())
 
 
 def _division_headings(nodes: list[StructuralNode]) -> list[StructuralNode]:
@@ -157,7 +164,12 @@ def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
         if starts_chapter:
             if current is None and front_matter:
                 chapters.append(Chapter(filename="", title="Front Matter", nodes=front_matter))
-            title = node.text.strip() or f"Chapter {len(chapters) + 1}"
+            # The sentinels that carry inline emphasis and note markers are
+            # turned into real tags by the inline renderer, but a chapter title
+            # goes straight into <title> and the navigation, which never pass
+            # through it — so they reached the reader as invisible private-use
+            # characters in the tab title and the table of contents.
+            title = _plain_title(node.text) or f"Chapter {len(chapters) + 1}"
             current = Chapter(filename="", title=title, nodes=[node])
             chapters.append(current)
         elif current is not None:

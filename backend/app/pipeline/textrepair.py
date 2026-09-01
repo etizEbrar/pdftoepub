@@ -275,6 +275,47 @@ def _confusion_candidates(
 
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
+# Glyphs from a symbol-encoded font.
+#
+# A TrueType font with a (3,0) symbol cmap maps character code N to U+F000+N,
+# and a PDF that ships no ToUnicode map hands that straight back. The text is
+# perfectly ordinary — "978-625" arrives as U+F039 U+F037 U+F038 U+F02D … —
+# but every reader shows it as an empty box, so the ISBN on the copyright page
+# was unreadable while the same digits sat beside it in a normal font.
+#
+# Subtracting 0xF000 is the documented convention, not a guess, so this is
+# recovery rather than correction. Only the printable ASCII window is mapped;
+# anything outside it stays exactly as found and is counted instead.
+_SYMBOL_PUA_START, _SYMBOL_PUA_END = 0xF020, 0xF07E
+# The one non-ASCII symbol common enough to be worth naming: Symbol and
+# Wingdings both put their bullet here, and it appears in list after list.
+_SYMBOL_PUA_EXTRA = {"\uf0b7": "\u2022"}
+_PUA_RE = re.compile("[\ue006-\uf8ff]")  # sentinels U+E000-E005 deliberately excluded
+
+
+def _recover_symbol_font_glyphs(text: str) -> tuple[str, int]:
+    """Map symbol-font private-use codepoints back to the characters they mean.
+
+    Returns the recovered text and the number of private-use characters that
+    could not be mapped, which the quality report surfaces rather than hides.
+    """
+    if not _PUA_RE.search(text):
+        return text, 0
+    out: list[str] = []
+    unmapped = 0
+    for ch in text:
+        code = ord(ch)
+        if ch in _SYMBOL_PUA_EXTRA:
+            out.append(_SYMBOL_PUA_EXTRA[ch])
+        elif _SYMBOL_PUA_START <= code <= _SYMBOL_PUA_END:
+            out.append(chr(code - 0xF000))
+        elif 0xE006 <= code <= 0xF8FF:
+            out.append(ch)
+            unmapped += 1
+        else:
+            out.append(ch)
+    return "".join(out), unmapped
+
 # Typographic ligatures are presentation forms of ordinary letters. Leaving them
 # in breaks search, copy and text-to-speech, and some readers show a blank box.
 # Expanded explicitly rather than via NFKC, which would also rewrite fractions,
@@ -310,6 +351,18 @@ def _normalise_text(text: str) -> tuple[str, list[tuple[CorrectionKind, str, str
             (CorrectionKind.UNICODE, text, expanded, "expanded typographic ligature")
         )
     text = expanded
+
+    recovered, _unmapped = _recover_symbol_font_glyphs(text)
+    if recovered != text:
+        changes.append(
+            (
+                CorrectionKind.UNICODE,
+                text,
+                recovered,
+                "recovered text from a symbol-encoded font",
+            )
+        )
+    text = recovered
 
     stripped = _CONTROL_CHARS.sub("", text)
     if stripped != text:

@@ -42,6 +42,22 @@ def is_division_label(text: str) -> bool:
 
 
 _SUBSECTION_RE = re.compile(r"^\s*\d{1,3}\.\d{1,3}")
+# "1.", "2.3.", "4.5.6." — the depth of a heading's own section number.
+_SECTION_NUMBER_RE = re.compile(r"^\s*(\d{1,3}(?:\.\d{1,3})*)\.?\s*\D")
+
+
+def section_number_depth(text: str) -> int:
+    """How deeply a heading numbers itself, or 0 when it does not.
+
+    "1. GİRİŞ" is depth 1, "1.2. Literatür" is 2, "3.1.4. Sonuç" is 3. This is
+    the book stating its own hierarchy, which is better evidence than type size:
+    a chapter opener and the sections beneath it are frequently set at exactly
+    the same scale, and inferring levels from size alone flattens them together.
+    """
+    match = _SECTION_NUMBER_RE.match(" ".join(text.split()))
+    if not match:
+        return 0
+    return len(match.group(1).split("."))
 
 
 def is_subsection_heading(text: str) -> bool:
@@ -329,6 +345,32 @@ def assign_heading_levels(nodes: list[StructuralNode]) -> None:
                 level = index + 1
                 break
         node.level = level
+
+    _apply_numbering_hierarchy(headings)
+
+
+def _apply_numbering_hierarchy(headings: list[StructuralNode]) -> None:
+    """Deepen headings that number themselves as subsections of a chapter.
+
+    Only applied when the book actually labels divisions, and only ever to push
+    a heading *deeper* — never to promote one. Type size still decides what a
+    chapter is; the numbering only says what sits underneath it.
+    """
+    divisions = [n for n in headings if is_division_heading(n.text)]
+    if len(divisions) < 2:
+        return
+    levels = [n.level for n in divisions if n.level]
+    if not levels:
+        return
+    chapter_level = max(set(levels), key=levels.count)
+
+    for node in headings:
+        depth = section_number_depth(node.text)
+        if depth < 2:
+            continue  # "1. GİRİŞ" is a chapter opener, not a subsection
+        proposed = min(6, chapter_level + depth - 1)
+        if node.level is None or proposed > node.level:
+            node.level = proposed
 
 
 def typical_line_gap(blocks: list[Block]) -> float:

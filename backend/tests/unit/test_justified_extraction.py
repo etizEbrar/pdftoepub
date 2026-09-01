@@ -121,3 +121,68 @@ class TestDivisionHeadings:
         ]
         assert merge_division_numbers(nodes) == 1
         assert nodes[0].text == "BÖLÜM 3 VERİ YAPILARI ÜZERİNE DERLEME"
+
+
+class TestNumberingHierarchy:
+    """A book that numbers its own sections has stated its own hierarchy.
+
+    In the real Turkish book "BÖLÜM 1" and "1.1. Bilimde Yapay Zekâ" are set at
+    the same size, so levels inferred from type alone made both h2 and the
+    navigation read as a flat list of forty equal entries.
+    """
+
+    @staticmethod
+    def _headings(*texts_and_scales) -> list[StructuralNode]:
+        out = []
+        for i, (text, scale) in enumerate(texts_and_scales):
+            n = StructuralNode(
+                node_id=f"h{i}", role=BlockRole.HEADING, text=text,
+                source_block_ids=[f"b{i}"], page=1 + i,
+            )
+            n.heading_scale = scale
+            out.append(n)
+        return out
+
+    def test_numbered_sections_sit_below_their_chapter(self):
+        from app.pipeline.headings import assign_heading_levels
+
+        nodes = self._headings(
+            ("BÖLÜM 1", 1.6), ("1.1. Bilimde Yapay Zekâ", 1.6),
+            ("1.2. Açıklanabilir Yapay Zekâ", 1.6), ("BÖLÜM 2", 1.6),
+        )
+        assign_heading_levels(nodes)
+        by_text = {n.text: n.level for n in nodes}
+        assert by_text["1.1. Bilimde Yapay Zekâ"] > by_text["BÖLÜM 1"], (
+            f"sections not nested under the chapter: {by_text}"
+        )
+        assert by_text["BÖLÜM 1"] == by_text["BÖLÜM 2"], "chapters at differing levels"
+
+    def test_a_chapter_opener_numbered_1_is_not_demoted(self):
+        """"1. GİRİŞ" opens a division; only dotted numbers are subsections."""
+        from app.pipeline.headings import assign_heading_levels
+
+        nodes = self._headings(
+            ("BÖLÜM 1", 1.6), ("1. GİRİŞ", 1.6), ("BÖLÜM 2", 1.6),
+        )
+        assign_heading_levels(nodes)
+        by_text = {n.text: n.level for n in nodes}
+        assert by_text["1. GİRİŞ"] == by_text["BÖLÜM 1"]
+
+    def test_deeper_numbering_goes_deeper_still(self):
+        from app.pipeline.headings import assign_heading_levels
+
+        nodes = self._headings(
+            ("BÖLÜM 1", 1.6), ("1.2. Section", 1.6), ("1.2.3. Subsection", 1.6),
+            ("BÖLÜM 2", 1.6),
+        )
+        assign_heading_levels(nodes)
+        by_text = {n.text: n.level for n in nodes}
+        assert by_text["1.2.3. Subsection"] > by_text["1.2. Section"] > by_text["BÖLÜM 1"]
+
+    def test_a_book_without_division_labels_is_left_to_typography(self):
+        """No divisions means no evidence of a chapter level to nest under."""
+        from app.pipeline.headings import assign_heading_levels
+
+        nodes = self._headings(("1.1. One", 1.6), ("1.2. Two", 1.6))
+        assign_heading_levels(nodes)
+        assert {n.level for n in nodes} == {1}, "levels changed without evidence"

@@ -121,6 +121,18 @@ def mark_reference_candidates(
         block.text = text
 
 
+def strip_all_sentinels(text: str) -> str:
+    """Remove every private-use sentinel this module plants.
+
+    For output that never passes through the inline renderer — a <title>
+    element, a navigation label — where a leftover sentinel would reach the
+    reader as an invisible or boxed character.
+    """
+    for sentinel in (MARKER_OPEN, MARKER_CLOSE, *EMPHASIS_SENTINELS):
+        text = text.replace(sentinel, "")
+    return text
+
+
 def strip_emphasis_sentinels(text: str) -> str:
     """Remove inline-emphasis sentinels, for callers that pattern-match text."""
     for sentinel in EMPHASIS_SENTINELS:

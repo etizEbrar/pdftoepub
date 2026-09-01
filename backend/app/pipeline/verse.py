@@ -4,6 +4,7 @@ import re
 import statistics
 
 from app.models.document import Block, BlockRole, StructuralNode
+from app.pipeline import headings
 
 # Verse lines stop well short of the text column; prose runs to the margin.
 _SHORT_LINE_RATIO = 0.72
@@ -34,7 +35,19 @@ _MAX_PAGE_REFERENCE_SHARE = 0.3
 # A run whose lines mostly open with their own item number is a list.
 _MAX_ITEM_NUMBER_SHARE = 0.4
 
+# Verse is written in ordinary language, so its lines carry the small
+# lowercase words that sentences are made of. A list of names or titles carries
+# almost none: "Prof. Dr. Elif ORHAN" has no such word at all.
+_MIN_LOWERCASE_WORD_SHARE = 0.5
+# A run that is mostly capitals is a title block or a heading set over several
+# lines, not a poem.
+_MAX_ALL_CAPS_SHARE = 0.5
+# "EF : Emisyon faktörü (kg/kWh)" — a nomenclature table, one symbol per line.
+_MAX_DEFINITION_SHARE = 0.5
+
 _PAGE_REFERENCE_RE = re.compile(r"\d{1,4}\s*$")
+_LOWERCASE_WORD_RE = re.compile(r"(?:^|\s)[^\W\d_]{2,}(?=\s|$)")
+_DEFINITION_RE = re.compile(r"^\s*\S{1,12}\s*[:=]\s+\S")
 _ITEM_NUMBER_RE = re.compile(r"^\s*[\(\[]?\d{1,3}[\.\)\]]?\s")
 _BARE_NUMBER_LINE_RE = re.compile(r"^\s*[\(\[]?\d{1,4}[\.\)\]]?\s*$")
 # Consecutive verse lines sit about one leading apart; a bigger gap is a stanza
@@ -131,6 +144,28 @@ def _looks_like_verse_run(
 
     item_numbers = sum(1 for t in texts if _ITEM_NUMBER_RE.match(t))
     if item_numbers / len(texts) > _MAX_ITEM_NUMBER_SHARE:
+        return False, 0.0
+
+    # A run that opens by naming a division is a chapter heading set over
+    # several lines. Turning it into verse loses the chapter.
+    if any(headings.is_division_label(t) for t in texts):
+        return False, 0.0
+
+    all_caps = sum(1 for t in texts if t.strip() and t.upper() == t and any(c.isalpha() for c in t))
+    if all_caps / len(texts) > _MAX_ALL_CAPS_SHARE:
+        return False, 0.0
+
+    definitions = sum(1 for t in texts if _DEFINITION_RE.match(t))
+    if definitions / len(texts) > _MAX_DEFINITION_SHARE:
+        return False, 0.0
+
+    # Lines made only of capitalised words are names and titles, not verse.
+    with_lowercase = sum(
+        1
+        for t in texts
+        if any(w.islower() for w in _LOWERCASE_WORD_RE.findall(t))
+    )
+    if with_lowercase / len(texts) < _MIN_LOWERCASE_WORD_SHARE:
         return False, 0.0
 
     confidence = (
