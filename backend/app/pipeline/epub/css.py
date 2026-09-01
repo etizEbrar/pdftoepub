@@ -79,6 +79,17 @@ aside[epub|type~="footnote"] {
   border-left: 2px solid #ccc;
 }
 
+/* A note-shaped block that nothing in the text refers to. Set like a note, but
+   an ordinary paragraph, so a reading system that hides unopened footnotes
+   cannot make it unreachable. */
+p.note-unlinked {
+  font-size: 0.9em;
+  margin: 0.8em 0;
+  padding-left: 0.5em;
+  border-left: 2px solid #ddd;
+  text-indent: 0;
+}
+
 nav[epub|type~="toc"] ol {
   list-style: none;
   margin-left: 0;

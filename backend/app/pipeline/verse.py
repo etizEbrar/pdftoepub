@@ -44,6 +44,15 @@ _MIN_LOWERCASE_WORD_SHARE = 0.5
 _MAX_ALL_CAPS_SHARE = 0.5
 # "EF : Emisyon faktörü (kg/kWh)" — a nomenclature table, one symbol per line.
 _MAX_DEFINITION_SHARE = 0.5
+# How unevenly the lines may vary in length, as a coefficient of variation.
+#
+# A poem's lines are of comparable length because they are written to a measure.
+# The things that masquerade as poems are not: a vocabulary box sets "be" beside
+# "eat get go out invite steal", a fill-in exercise puts a lone full stop under a
+# full sentence, and a wrapped prose sentence pairs a 107-character line with a
+# 7-character remainder. Measured on real material, poems sit at 0.28-0.31 and
+# every impostor above 0.8.
+_MAX_LENGTH_VARIATION = 0.55
 
 _PAGE_REFERENCE_RE = re.compile(r"\d{1,4}\s*$")
 _LOWERCASE_WORD_RE = re.compile(r"(?:^|\s)[^\W\d_]{2,}(?=\s|$)")
@@ -158,6 +167,17 @@ def _looks_like_verse_run(
     definitions = sum(1 for t in texts if _DEFINITION_RE.match(t))
     if definitions / len(texts) > _MAX_DEFINITION_SHARE:
         return False, 0.0
+
+    # A line with nothing to read is an answer blank, not a line of verse.
+    if any(t.strip() and not any(c.isalnum() for c in t) for t in texts):
+        return False, 0.0
+
+    lengths = [len(t) for t in texts]
+    mean_length = sum(lengths) / len(lengths)
+    if mean_length > 0:
+        variation = statistics.pstdev(lengths) / mean_length
+        if variation > _MAX_LENGTH_VARIATION:
+            return False, 0.0
 
     # Lines made only of capitalised words are names and titles, not verse.
     with_lowercase = sum(

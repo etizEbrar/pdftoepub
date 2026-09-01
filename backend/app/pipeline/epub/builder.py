@@ -426,10 +426,25 @@ def render_chapter_body(
             # stop would put punctuation in the book that the author never
             # wrote, which is the same defect as inventing an ellipsis.
             prefix = f"{marker} " if marker else ""
-            parts.append(
-                f'<aside epub:type="{epub_type}" id="{footnote_anchor_id(node.node_id)}"{dir_attr}>'
-                f"<p>{prefix}{content}{back_links}</p></aside>"
-            )
+            if node.footnote_backrefs:
+                parts.append(
+                    f'<aside epub:type="{epub_type}" '
+                    f'id="{footnote_anchor_id(node.node_id)}"{dir_attr}>'
+                    f"<p>{prefix}{content}{back_links}</p></aside>"
+                )
+            else:
+                # Nothing in the text points here. A reading system is allowed
+                # to hide epub:type="footnote" content until a noteref
+                # activates it, so marking an unreferenced block as a footnote
+                # can make it unreachable — which is how sixty pages of a
+                # grammar book's answer key came to be tagged as notes that
+                # nothing could open. Keep the text visible and let the
+                # quality report say it was never linked.
+                parts.append(
+                    f'<p class="note-unlinked" '
+                    f'id="{footnote_anchor_id(node.node_id)}"{dir_attr}>'
+                    f"{prefix}{content}</p>"
+                )
         else:  # PARAGRAPH and any unclassified text role
             content = render_inline(node.text, resolve_note_href)
             if not content.strip():

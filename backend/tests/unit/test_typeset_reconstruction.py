@@ -357,3 +357,33 @@ class TestVerseRequiresPositiveEvidence:
             "The Carriage held but just Ourselves",
             "And Immortality",
         ]) == 1
+
+    def test_a_vocabulary_box_is_not_verse(self):
+        """Lines of wildly differing length are a word bank, not a poem."""
+        assert self._detect([
+            "be", "eat get go out invite steal", "take off tell try use", "walk",
+        ]) == 0
+
+    def test_a_fill_in_blank_exercise_is_not_verse(self):
+        """A line with nothing to read is an answer blank."""
+        assert self._detect([
+            "a She enjoys her job, but it is often", ".",
+            "b At the end of a day's work, she is often", ".",
+        ]) == 0
+
+    def test_a_wrapped_prose_sentence_is_not_verse(self):
+        """A very long line followed by its short remainder is prose."""
+        assert self._detect([
+            "In British English, verbs ending in -l have -ll- before -ing and -ed "
+            "whether the final syllable is stressed",
+            "or not:",
+            "travel / travelled",
+        ]) == 0
+
+    def test_verse_lines_of_comparable_length_still_pass(self):
+        assert self._detect([
+            "We slowly drove he knew no haste",
+            "And I had put away",
+            "My labor and my leisure too",
+            "For His Civility",
+        ]) == 1
