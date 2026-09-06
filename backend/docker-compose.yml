@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    image: pdftoepub-backend
+    container_name: pdftoepub-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - pdftoepub_data:/data
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+      - DATA_DIR=/data
+      - OCR_ENABLED=true
+      - OCR_LANGUAGES=eng+tur
+      - MAX_UPLOAD_MB=200
+      - MAX_PAGE_COUNT=2000
+      - JOB_TTL_HOURS=6
+      - JOB_CONCURRENCY=2
+      # AI_PROVIDER=none by default. Change if you want to use Anthropic API.
+      - AI_PROVIDER=none
+
+volumes:
+  pdftoepub_data:

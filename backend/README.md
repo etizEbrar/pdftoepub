@@ -1,3 +1,13 @@
+---
+title: PDFtoEPUB Backend
+emoji: 📚
+colorFrom: blue
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # PDF → EPUB backend
 
 FastAPI service implementing the document-reconstruction pipeline described in

@@ -21,14 +21,14 @@ primary_region = "CHANGE-ME"          # e.g. "fra", "ams", "iad" — pick one ne
   AI_PROVIDER = "none"
   DATA_DIR = "/data"
   PORT = "8000"
-  OCR_ENABLED = "true"
-  OCR_LANGUAGES = "eng+tur"
-  MAX_UPLOAD_MB = "200"
-  MAX_PAGE_COUNT = "2000"
+  OCR_ENABLED = "false"
+  # OCR is disabled to fit in the 256MB free tier RAM limit.
+  MAX_UPLOAD_MB = "20"
+  MAX_PAGE_COUNT = "500"
   # Uploaded documents are deleted this many hours after conversion at the
   # latest; the iOS client also deletes each job as soon as it has the EPUB.
-  JOB_TTL_HOURS = "6"
-  JOB_CONCURRENCY = "2"
+  JOB_TTL_HOURS = "2"
+  JOB_CONCURRENCY = "1"
 
 [http_service]
   internal_port = 8000
@@ -38,7 +38,7 @@ primary_region = "CHANGE-ME"          # e.g. "fra", "ams", "iad" — pick one ne
   auto_stop_machines = "suspend"
   auto_start_machines = true
   # A conversion in flight must not be killed by the machine stopping under it.
-  min_machines_running = 1
+  min_machines_running = 0
 
   [http_service.concurrency]
     type = "requests"
@@ -57,12 +57,13 @@ primary_region = "CHANGE-ME"          # e.g. "fra", "ams", "iad" — pick one ne
 # Temporary conversion files. A volume keeps a restart from losing a job that is
 # mid-flight; it is not long-term storage — the TTL sweep still deletes
 # everything, and no document is meant to outlive its conversion.
+# IMPORTANT: When creating the volume, use `fly vol create pdftoepub_data --size 1` to stay within the 1GB free tier.
 [[mounts]]
   source = "pdftoepub_data"
   destination = "/data"
 
 [[vm]]
-  # A 500-page book peaks around 170MB, but OCR of a large scan at 300dpi is
-  # heavier; 2GB leaves room for two concurrent conversions.
-  size = "shared-cpu-2x"
-  memory = "2gb"
+  # WARNING: 256MB is the maximum for the free tier. OCR is disabled because it
+  # will cause Out of Memory (OOM) crashes on 256MB.
+  size = "shared-cpu-1x"
+  memory = "256mb"

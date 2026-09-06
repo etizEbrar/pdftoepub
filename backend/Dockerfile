@@ -51,20 +51,26 @@ COPY app ./app
 
 # Uploaded documents are private user data. They live only under this directory
 # and are swept on a TTL — see app/storage/temp_storage.py.
-RUN mkdir -p /data && useradd --create-home --uid 10001 appuser && chown -R appuser /data /app
+# UID 1000 specifically: Hugging Face Spaces runs containers as that user and
+# nothing else is writable there. Any other host is indifferent to the number,
+# so this stays portable rather than being an HF-only build.
+RUN mkdir -p /data \
+    && useradd --create-home --uid 1000 appuser \
+    && chown -R appuser /data /app
 USER appuser
+ENV HOME=/home/appuser
 
 ENV ENVIRONMENT=production \
     AI_PROVIDER=none \
     DATA_DIR=/data \
     HOST=0.0.0.0 \
-    PORT=8000
+    PORT=7860
 
-EXPOSE 8000
+EXPOSE 7860
 
 # The platform restarts the container if this stops answering.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4).status==200 else 1)"
+    CMD python -c "import urllib.request,os,sys; port=os.environ.get('PORT','7860'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=4).status==200 else 1)"
 
 # One uvicorn process. The job queue and its workers live inside it, so scaling
 # means more machines, not more workers in this container — see docs/deployment.md.
