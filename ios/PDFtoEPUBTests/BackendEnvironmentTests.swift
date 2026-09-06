@@ -173,3 +173,46 @@ final class DiskSpaceTests: XCTestCase {
         )
     }
 }
+
+/// Guards the dev/production split once a real backend exists.
+///
+/// Filling in PRODUCTION_BACKEND_URL used to change Debug behaviour too, because
+/// the configured URL was consulted before the Debug default. Every local run
+/// and every test would then have driven the live Render service.
+final class BackendEnvironmentSeparationTests: XCTestCase {
+
+    func testTheProductionURLIsConfiguredAndUsable() {
+        let configured = Bundle(for: type(of: self))
+            .object(forInfoDictionaryKey: "PRODUCTION_BACKEND_URL") as? String
+        // The test bundle has its own plist; read the app's through the class
+        // it ships with instead.
+        let appConfigured = Bundle(for: AppSettings.self)
+            .object(forInfoDictionaryKey: "PRODUCTION_BACKEND_URL") as? String
+        let value = (appConfigured ?? configured ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !value.isEmpty else {
+            return  // no backend configured in this build; nothing to assert
+        }
+        XCTAssertNil(
+            BackendEnvironment.validate(value),
+            "the configured production URL is not one the app would accept"
+        )
+        let url = URL(string: value)
+        XCTAssertNotNil(url)
+        XCTAssertEqual(url?.scheme, "https", "a shipped backend must be https")
+        XCTAssertFalse(
+            BackendEnvironment.isPrivateAddress(url!),
+            "a shipped backend must not be a private address"
+        )
+    }
+
+    #if DEBUG
+    func testDebugStillDefaultsToLocalhostEvenWithAProductionURLConfigured() {
+        XCTAssertEqual(
+            BackendEnvironment.defaultBaseURLString, "http://localhost:8000",
+            "a debug build is pointing at the production backend"
+        )
+    }
+    #endif
+}

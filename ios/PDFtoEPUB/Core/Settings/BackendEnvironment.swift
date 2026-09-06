@@ -16,15 +16,18 @@ import Foundation
 enum BackendEnvironment {
     /// The address a fresh install should use, or nil when none is configured.
     static var defaultBaseURLString: String? {
-        if let configured = configuredProductionURL {
-            return configured
-        }
         #if DEBUG
+        // Development stays local even once a production backend exists.
+        // Checking the configured URL first meant that the moment one was
+        // filled in, every debug run and every test began driving the live
+        // service — the opposite of what a dev build should do. The address is
+        // still editable in Settings, so testing against production remains one
+        // field away.
         return "http://localhost:8000"
         #else
         // Release with no production backend: the app must ask rather than
         // silently point at a machine the user does not have.
-        return nil
+        return configuredProductionURL
         #endif
     }
 

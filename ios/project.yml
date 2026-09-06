@@ -20,7 +20,7 @@ settings:
     # fails mysteriously instead of one that asks the user for an address.
     # Set it here (or pass PRODUCTION_BACKEND_URL=... to xcodebuild) once a
     # public HTTPS endpoint exists.
-    PRODUCTION_BACKEND_URL: ""
+    PRODUCTION_BACKEND_URL: "https://pdftoepub-backend.onrender.com"
 
 packages: {}
 
