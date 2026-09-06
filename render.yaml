@@ -1,0 +1,71 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One long-lived container. The conversion pipeline holds an in-process job
+# queue and writes temporary files to local disk, so it cannot be split into
+# request-scoped functions.
+#
+# Values below are tuned to the free plan's 512 MB. They were measured, not
+# guessed — see the comments on each.
+services:
+  - type: web
+    name: pdftoepub-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: ENVIRONMENT
+        value: production
+      # No paid AI, ever. The conversion is deterministic and local.
+      - key: AI_PROVIDER
+        value: none
+
+      # OCR stays ON. Turning it off does not degrade a scanned book, it fails
+      # it outright — "No extractable text was found in this PDF" — and scanned
+      # support is advertised in the App Store listing.
+      - key: OCR_ENABLED
+        value: "true"
+      # 300 dpi peaked at 404 MB on real scanned pages, which leaves no room for
+      # the EPUBCheck JVM beside it. 150 dpi peaks at 246 MB and read within 1%
+      # of the same words. 200 dpi actually read slightly *more* text than 300,
+      # so higher is not automatically better here.
+      - key: OCR_DPI
+        value: "150"
+      - key: OCR_LANGUAGES
+        value: eng+tur
+
+      # One conversion at a time. The default of 2 would put two OCR jobs of
+      # ~250 MB each in a 512 MB container, which is an out-of-memory kill.
+      - key: JOB_CONCURRENCY
+        value: "1"
+
+      # EPUBCheck is a Java process running *beside* Python, not inside it, so
+      # its heap adds to the container total. Left uncapped the JVM sizes itself
+      # against the host and can overrun the plan.
+      - key: JAVA_TOOL_OPTIONS
+        value: "-Xmx160m"
+
+      # Free-plan CPU is shared and slow; a very long scanned book would occupy
+      # the single worker for a long time. These bound the worst case rather
+      # than letting one upload monopolise the service.
+      - key: MAX_UPLOAD_MB
+        value: "25"
+      - key: MAX_PAGE_COUNT
+        value: "600"
+      - key: CONVERSION_TIMEOUT_SECONDS
+        value: "1500"
+
+      # Free plan has no persistent disk, so /data is ephemeral. That suits the
+      # design: uploads are deleted as soon as the client has its EPUB, and this
+      # is only the outside limit for an abandoned job.
+      - key: JOB_TTL_HOURS
+        value: "3"
+
+      # The iOS client is not a browser and is unaffected by CORS.
+      - key: CORS_ALLOW_ORIGINS
+        value: ""
