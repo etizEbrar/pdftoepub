@@ -216,3 +216,18 @@ final class BackendEnvironmentSeparationTests: XCTestCase {
     }
     #endif
 }
+
+extension BackendEnvironmentSeparationTests {
+    #if DEBUG
+    /// The Settings screen hides the address field when the build manages the
+    /// backend. In development it must stay visible and editable, or there is no
+    /// way to point a debug build at a local server.
+    func testDevelopmentAlwaysLetsTheAddressBeChanged() {
+        XCTAssertFalse(
+            BackendEnvironment.isManagedByBuild,
+            "a debug build is hiding the backend address field"
+        )
+        XCTAssertFalse(BackendEnvironment.requiresUserSuppliedAddress)
+    }
+    #endif
+}

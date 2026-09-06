@@ -33,8 +33,18 @@ enum BackendEnvironment {
 
     /// True when the build has a hosted backend and the address is not the
     /// user's concern. Settings hides the field in that case.
+    ///
+    /// Follows the same split as `defaultBaseURLString`, and for the same
+    /// reason. Configuring a production URL otherwise hid the address field in
+    /// development too, leaving a debug build that used localhost while telling
+    /// the developer the server was "managed by the app" and refusing to let
+    /// them change it.
     static var isManagedByBuild: Bool {
-        configuredProductionURL != nil
+        #if DEBUG
+        return false
+        #else
+        return configuredProductionURL != nil
+        #endif
     }
 
     /// True when this build cannot convert anything until the user supplies an
