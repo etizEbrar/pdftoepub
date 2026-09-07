@@ -104,7 +104,7 @@ accounts, no tracking and no ads. The full technical detail is in
 
 ## Contact
 
-[SUPPORT EMAIL]
+safiyeebraretiz@gmail.com
 
 When reporting a problem, it helps to include:
 

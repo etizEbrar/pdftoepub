@@ -13,7 +13,7 @@
 
 Safiye Ebrar Etiz ("we") operates the PDF to EPUB application.
 
-Contact for privacy questions: [SUPPORT EMAIL]
+Contact for privacy questions: safiyeebraretiz@gmail.com
 
 ## The short version
 
@@ -106,7 +106,7 @@ ask.
 
 Depending on where you live, you may have rights to access, correct, delete or
 restrict the processing of personal data we hold about you, and to complain to
-your data protection authority. To make a request, contact [SUPPORT EMAIL].
+your data protection authority. To make a request, contact safiyeebraretiz@gmail.com.
 
 > **Note on GDPR/CCPA:** this policy describes the software's actual behaviour.
 > Whether the service meets the requirements of a particular regime depends on
@@ -118,7 +118,7 @@ your data protection authority. To make a request, contact [SUPPORT EMAIL].
 This app is not directed at children, and we do not knowingly collect personal
 information from children. We do not ask any user their age, because we do not
 collect personal information at all beyond what is described above. If you
-believe a child has sent us information, contact [SUPPORT EMAIL].
+believe a child has sent us information, contact safiyeebraretiz@gmail.com.
 
 ## Cookies and web technologies
 
@@ -137,5 +137,5 @@ updated" date above.
 ## Contact
 
 Safiye Ebrar Etiz
-[SUPPORT EMAIL]
+safiyeebraretiz@gmail.com
 https://etizebrar.github.io/pdftoepub
