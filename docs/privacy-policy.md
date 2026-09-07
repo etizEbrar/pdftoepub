@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** [DATE YOU PUBLISH THIS]
+**Last updated:** 2026-09-07
 **Applies to:** the PDF to EPUB iOS application
 
 > **Before publishing:** replace every `[BRACKETED]` placeholder. Those are
@@ -11,7 +11,7 @@
 
 ## Who is responsible
 
-[APP OWNER NAME] ("we") operates the PDF to EPUB application.
+Safiye Ebrar Etiz ("we") operates the PDF to EPUB application.
 
 Contact for privacy questions: [SUPPORT EMAIL]
 
@@ -47,8 +47,7 @@ finishing.
 
 If a conversion is abandoned (for example the app is closed mid-conversion), an
 automatic cleanup removes the files and the associated record within
-[RETENTION WINDOW — the JOB_TTL_HOURS value you deploy with; the shipped
-configuration is 6 hours].
+3 hours.
 
 We do not keep copies, backups or archives of your documents beyond this.
 
@@ -75,7 +74,7 @@ effect.
 ## Who else receives your data
 
 **Our hosting provider**, which runs the conversion server and necessarily
-processes the traffic to it: [HOSTING PROVIDER NAME AND COUNTRY/REGION].
+processes the traffic to it: Render (Render Services, Inc.), Frankfurt, Germany (EU).
 
 Apple processes your download of the app itself, and any information you send
 via TestFlight or App Store feedback, under Apple's own privacy policy. We do
@@ -86,7 +85,7 @@ data broker.
 
 ## Where your data is processed
 
-The conversion server runs in [SERVER REGION]. If you are located elsewhere,
+The conversion server runs in Frankfurt, Germany (EU). If you are located elsewhere,
 your document is transmitted to that region for the moments it takes to convert
 it, and is then deleted.
 
@@ -137,6 +136,6 @@ updated" date above.
 
 ## Contact
 
-[APP OWNER NAME]
+Safiye Ebrar Etiz
 [SUPPORT EMAIL]
-[PRIVACY POLICY DOMAIN]
+https://etizebrar.github.io/pdftoepub

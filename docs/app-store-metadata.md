@@ -103,9 +103,9 @@ processing not collection.
 
 | Field | Value |
 | --- | --- |
-| Support URL | `[YOUR DOMAIN]/support.html` |
-| Privacy Policy URL | `[YOUR DOMAIN]/privacy.html` |
-| Marketing URL | `[YOUR DOMAIN]/` (optional) |
+| Support URL | `https://etizebrar.github.io/pdftoepub/support.html` |
+| Privacy Policy URL | `https://etizebrar.github.io/pdftoepub/privacy.html` |
+| Marketing URL | `https://etizebrar.github.io/pdftoepub/` (optional) |
 
 Publish `site/` at any static host — GitHub Pages, Cloudflare Pages, Netlify —
 and these three URLs exist. The pages are complete apart from the bracketed
@@ -117,7 +117,7 @@ owner name and support email.
 The app converts using a conversion server. It does not bundle one, so the
 reviewer needs an address to point it at.
 
-Server for review: [YOUR BACKEND URL]
+Server for review: https://pdftoepub-backend.onrender.com
 
 Steps:
 1. Open the app. It reports that no server is configured.
