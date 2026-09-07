@@ -114,28 +114,36 @@ owner name and support email.
 ## Review notes
 
 ```
-The app converts using a conversion server. It does not bundle one, so the
-reviewer needs an address to point it at.
+This app converts PDFs using a hosted server. No account or login is required.
 
-Server for review: https://pdftoepub-backend.onrender.com
+Server: https://pdftoepub-backend.onrender.com
+
+PLEASE READ FIRST — the first request may take up to 60 seconds.
+The backend runs on a free hosting tier that suspends the service after about
+15 minutes without traffic. The first conversion after an idle period has to
+wake it, so the app can appear to sit on "Uploading" or "Queued" for up to a
+minute. It is not frozen. Subsequent conversions start immediately. If you would
+like us to move it to an always-on tier for the duration of the review, please
+let us know and we will do so.
 
 Steps:
-1. Open the app. It reports that no server is configured.
-2. Tap Open Settings, enter the address above, tap Test connection.
-   It should report "Connected (none)" — "none" means no AI provider is in use.
-3. Tap Done, then Select PDF, and choose any PDF.
-4. Choose a conversion mode and tap Convert to EPUB.
-5. The quality report appears; tap Preview EPUB, or share it to Apple Books.
-
-A sample PDF is included in the app's Documents folder, reachable through the
-Files picker under "On My iPhone".
+1. Open the app and tap "Select PDF".
+2. Choose any PDF. A sample is included in the app's own folder, reachable
+   through the Files picker under "On My iPhone" > "PDF to EPUB".
+3. Pick a conversion mode and tap "Convert to EPUB".
+4. Progress is shown per page. Allow the extra wake-up time on the first run.
+5. The quality report appears — pages, chapters, footnotes linked, EPUB3
+   validation, and whether any AI was used (it reports "None (fully local)").
+6. Tap "Preview EPUB" to read it in the app, or "Share or Save to Files" to
+   open it in Apple Books.
 
 Notes:
-- On first connection iOS asks permission to find devices on the local network.
-  This is only needed if the server address is on the same network; a public
-  https:// server does not prompt.
-- No account or login is required.
-- No AI service is used; conversion is deterministic and runs on the server.
+- No AI service is used. Conversion is deterministic software running on the
+  server; the quality report shows "None (fully local)" for every conversion.
+- The uploaded PDF is deleted from the server as soon as the app has the
+  finished EPUB. Nothing is retained and no account is associated with it.
+- If a server address field is visible in Settings, the build was not configured
+  with a hosted backend. The submitted build is, and the field is hidden.
 ```
 
 ## Export compliance
