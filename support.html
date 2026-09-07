@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Support — PDF to EPUB</title>
+<style>
+:root{--ink:#1a2a4f;--muted:#5b6478;--bg:#fbfbfa;--card:#fff;--line:#e6e8ee}
+@media (prefers-color-scheme:dark){:root{--ink:#e8ecf5;--muted:#a2abbd;--bg:#12151c;--card:#1a1e27;--line:#2a303c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:44rem;margin:0 auto;padding:3rem 1.25rem}
+h1{font-size:2rem;margin:0 0 .25rem;line-height:1.2}
+h2{margin:2.5rem 0 .5rem;font-size:1.15rem}
+.sub{color:var(--muted);margin:0 0 2rem}
+nav a{display:inline-block;margin-right:1rem;color:var(--ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.25rem;margin:1rem 0}
+blockquote{border-left:3px solid var(--line);margin:1rem 0;padding:.25rem 0 .25rem 1rem;color:var(--muted)}
+code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.1rem .3rem;font-size:.9em}
+table{border-collapse:collapse;width:100%;margin:1rem 0}
+th,td{border:1px solid var(--line);padding:.4rem .6rem;text-align:left;font-size:.95em}
+footer{margin-top:3rem;color:var(--muted);font-size:.9rem;border-top:1px solid var(--line);padding-top:1rem}
+</style></head><body><div class="wrap">
+<nav><a href="./">← PDF to EPUB</a></nav>
+<h1>PDF to EPUB — Support</h1>
+<h2>How conversion works</h2>
+<p>You choose a PDF. The app checks it on your device, then sends it to the</p>
+<p>conversion server, which rebuilds it as a reflowable EPUB3 ebook and sends it</p>
+<p>back. Your file is deleted from the server once you have the result.</p>
+<p>&quot;Reflowable&quot; is the point: unlike a PDF, the finished book re-wraps to your</p>
+<p>screen, so you can change the font size and read comfortably on a phone.</p>
+<p>The conversion is deterministic and local to the server — it does not use a</p>
+<p>cloud AI service, and no part of your book is sent to an AI provider.</p>
+<h2>What converts well</h2>
+<ul>
+<li>Text-based PDFs — novels, non-fiction, reports, papers.</li>
+<li>Scanned books. Pages without a text layer are read with OCR.</li>
+<li>Books with footnotes and endnotes, which become tappable links.</li>
+<li>Tables, and simple equations, which become real MathML.</li>
+<li>Poetry and verse, which keep their line breaks.</li>
+<li>Right-to-left languages, including mixed-direction text.</li>
+</ul>
+<h2>What converts poorly</h2>
+<ul>
+<li><strong>Password-protected PDFs.</strong> Remove the password first — the app cannot open</li>
+</ul>
+<p>  them and will say so before uploading.</p>
+<ul>
+<li><strong>Heavily designed layouts</strong> — magazines, cookbooks, children&#x27;s picture books.</li>
+</ul>
+<p>  Where a page&#x27;s structure cannot be reconstructed safely, a faithful image of</p>
+<p>  it is kept instead of a guess.</p>
+<ul>
+<li><strong>Poor-quality scans.</strong> Faint, skewed or low-resolution pages produce weaker</li>
+</ul>
+<p>  OCR. Where the text cannot be read confidently, the page is preserved as an</p>
+<p>  image rather than filled with invented words.</p>
+<ul>
+<li><strong>Very large books.</strong> There are limits on file size and page count; the app</li>
+</ul>
+<p>  reports them if you hit one.</p>
+<h2>Setting up the conversion server</h2>
+<p>This app converts using a server you point it at.</p>
+<p>1. Open <strong>Settings</strong> in the app.</p>
+<p>2. Enter the server&#x27;s address.</p>
+<p>3. Tap <strong>Test connection</strong> — it reports exactly what it found.</p>
+<p>If you run the server on your own computer, use that computer&#x27;s address on your</p>
+<p>network, for example <code>http://192.168.1.10:8000</code>. On a real iPhone, <code>localhost</code></p>
+<p>means *the phone itself*, so it will not work. Both devices must be on the same</p>
+<p>Wi-Fi network.</p>
+<p>A server on the internet must use <code>https://</code> — the app will not send your</p>
+<p>documents unencrypted across the internet.</p>
+<h2>Troubleshooting</h2>
+<p><strong>&quot;No conversion server set up&quot;</strong></p>
+<p>You have not entered an address yet. Open Settings and add one.</p>
+<p><strong>&quot;No server at that address&quot;</strong></p>
+<p>The address could not be resolved. Check it for a typo.</p>
+<p><strong>&quot;Can&#x27;t reach the server&quot; / &quot;Nothing listening on that port&quot;</strong></p>
+<p>The address is right but nothing answered. Check the server is running, that the</p>
+<p>port is correct, and that both devices are on the same network.</p>
+<p><strong>&quot;No network connection&quot;</strong></p>
+<p>The device itself is offline. Check Wi-Fi or mobile data.</p>
+<p><strong>&quot;The server stopped responding&quot;</strong></p>
+<p>The conversion took longer than expected. Very large books take longer; try</p>
+<p>again, and if it recurs the server may be short of memory.</p>
+<p><strong>&quot;Use https:// …&quot;</strong></p>
+<p>You entered a plain <code>http://</code> address for a server on the internet. This is</p>
+<p>refused deliberately: your document would cross the network unencrypted.</p>
+<p><strong>&quot;This PDF is locked&quot;</strong></p>
+<p>The PDF is password-protected. Remove the password and try again.</p>
+<p><strong>&quot;We can&#x27;t read this PDF&quot;</strong></p>
+<p>The file is damaged, or is not really a PDF.</p>
+<p><strong>&quot;Not enough space&quot;</strong></p>
+<p>The device is too full to save the converted book. Free up space and retry.</p>
+<p><strong>&quot;Too many conversions started recently&quot;</strong></p>
+<p>The server limits how many conversions one client may start per hour. Wait and</p>
+<p>try again.</p>
+<p><strong>The conversion finished but the text has mistakes</strong></p>
+<p>On scanned books, OCR is imperfect. The app reports how many pages needed OCR</p>
+<p>and flags low-confidence results rather than hiding them. Where the text could</p>
+<p>not be read confidently, the original page image is preserved instead of</p>
+<p>guessed text.</p>
+<h2>Your privacy</h2>
+<p>Your PDF is uploaded only to convert it, and is deleted afterwards. There are no</p>
+<p>accounts, no tracking and no ads. The full technical detail is in</p>
+<p><a href="privacy.html">privacy.md</a>, and the policy is in</p>
+<p><a href="privacy.html">privacy-policy.md</a>.</p>
+<h2>Contact</h2>
+<p>safiyeebraretiz@gmail.com</p>
+<p>When reporting a problem, it helps to include:</p>
+<ul>
+<li>what kind of PDF it was (text or scanned, roughly how many pages),</li>
+<li>what the app showed, word for word,</li>
+<li>what you expected instead.</li>
+</ul>
+<p>Please do <strong>not</strong> send us the book itself unless we ask and you have the right</p>
+<p>to share it.</p>
+<footer><p><a href="./">Home</a> · <a href="privacy.html">Privacy</a> · <a href="support.html">Support</a></p></footer>
+</div></body></html>
