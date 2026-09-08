@@ -157,10 +157,12 @@ final class ConversionFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Preview EPUB"].exists)
         XCTAssertTrue(app.staticTexts["Pages"].exists)
         XCTAssertTrue(app.staticTexts["Chapters"].exists)
-        XCTAssertTrue(app.staticTexts["EPUB3 validation"].exists)
-
-        // The validation row must actually report a pass, not merely exist.
-        XCTAssertTrue(app.staticTexts["Pass"].exists, "EPUBCheck validation did not pass")
+        // Validation is now a badge rather than a row, but it must still say
+        // the file passed rather than merely being present.
+        XCTAssertTrue(
+            app.staticTexts["Validated EPUB3"].exists,
+            "the result does not state that the EPUB validated"
+        )
 
         // AI must have stayed off for a normal conversion.
         XCTAssertTrue(app.staticTexts["None (fully local)"].exists, "conversion unexpectedly used an AI provider")

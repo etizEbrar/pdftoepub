@@ -57,9 +57,11 @@ final class ScannedDocumentUITest: XCTestCase {
 
         // The result must state that OCR ran, and that no paid AI was involved.
         XCTAssertTrue(app.staticTexts["Pages read by OCR"].exists, "OCR usage not reported to the user")
-        XCTAssertTrue(app.staticTexts["OCR confidence"].exists)
         XCTAssertTrue(app.staticTexts["None (fully local)"].exists)
-        XCTAssertTrue(app.staticTexts["Pass"].exists, "EPUBCheck did not pass")
+        XCTAssertTrue(
+            app.staticTexts["Validated EPUB3"].exists,
+            "the result does not state that the EPUB validated"
+        )
 
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "scanned-result"

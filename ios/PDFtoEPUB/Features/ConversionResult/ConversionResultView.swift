@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// What the reader sees when their book is ready.
+///
+/// Deliberately short. The engine measures a great deal about a conversion —
+/// how many passages it declined to correct, how many notes it could not link —
+/// and that detail belongs in the quality report the backend returns, not on
+/// the screen someone reads once before opening their book. The two numbers a
+/// reader can actually act on are here: how much of the book arrived, and
+/// whether its footnotes are tappable.
 struct ConversionResultView: View {
     let document: SelectedDocument
     let report: QualityReport
@@ -9,97 +17,43 @@ struct ConversionResultView: View {
     @State private var isPreviewPresented = false
     @State private var isSharePresented = false
 
+    private var bookTitle: String {
+        report.title ?? document.title ?? document.filename
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.loose) {
                 headerCard
-                integrityWarningCard
-                statsCard
-                validationCard
+                summaryCard
             }
             .padding(Theme.Spacing.regular)
         }
         .background(Color(.systemGroupedBackground))
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: Theme.Spacing.tight) {
-                Button("Preview EPUB") { isPreviewPresented = true }
-                    .buttonStyle(PrimaryButtonStyle())
-
-                // Amazon publishes no URL scheme for handing a file to Kindle;
-                // the supported route is the share sheet, where Kindle registers
-                // as an EPUB handler. So this opens the sheet rather than
-                // attempting a direct hand-off that would quietly do nothing.
-                Button {
-                    isSharePresented = true
-                } label: {
-                    Label("Send to Kindle", systemImage: "books.vertical")
-                        .font(.body.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, Theme.Spacing.regular)
-                        .background(Color.secondary.opacity(0.12))
-                        .foregroundStyle(Color.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button, style: .continuous))
-                }
-                .accessibilityIdentifier("result.sendToKindle")
-                .accessibilityHint(Text(KindleHandoff.handoffExplanation))
-
-                Button {
-                    isSharePresented = true
-                } label: {
-                    Text("Share or Save to Files")
-                        .font(.footnote.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.vertical, 6)
-                }
-                .accessibilityIdentifier("result.share")
-
-                Button("Convert another PDF", action: onConvertAnother)
-                    .buttonStyle(.plain)
-                    .font(.footnote)
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.top, 4)
-            }
-            .padding(Theme.Spacing.regular)
-            .background(.bar)
-        }
+        .safeAreaInset(edge: .bottom) { actions }
         .fullScreenCover(isPresented: $isPreviewPresented) {
             EPUBPreviewView(url: epubURL) { isPreviewPresented = false }
                 .ignoresSafeArea()
         }
         .sheet(isPresented: $isSharePresented) {
-            EPUBShareSheet(
-                url: epubURL,
-                title: report.title ?? document.title ?? document.filename
-            ) { isSharePresented = false }
+            EPUBShareSheet(url: epubURL, title: bookTitle) { isSharePresented = false }
         }
     }
 
-    /// Whether the engine has anything to tell the reader about this book.
-    ///
-    /// The heading no longer changes to a warning. A conversion that finishes,
-    /// validates and reads correctly *is* complete, and titling it "worth
-    /// reviewing" because the engine declined to guess at some scanned passages
-    /// misrepresents caution as failure. The findings themselves are unchanged
-    /// and still shown in full below — the tone moved, the facts did not.
-    private var needsReview: Bool {
-        report.needsReview || report.contentIntegritySuspicious
-    }
+    // MARK: - Header
 
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
-            Label(
-                "Conversion complete",
-                systemImage: "checkmark.seal.fill"
-            )
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
+            Label("Conversion complete", systemImage: "checkmark.seal.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
 
-            Text(report.title ?? document.filename)
-                .font(.title3.weight(.semibold))
+            Text(bookTitle)
+                .font(.title2.weight(.semibold))
                 .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if let author = report.author {
+            if let author = report.author, !author.isEmpty {
                 Text(author)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -110,156 +64,130 @@ struct ConversionResultView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Only statistics the backend actually calculated are shown (spec section 60).
-    private var statsCard: some View {
+    // MARK: - Summary
+
+    /// Pages, chapters and words describe the book. The footnote row appears
+    /// only when the book has notes and only says how many are tappable —
+    /// which a reader discovers anyway the first time they tap one, so it is
+    /// better said here than left as a surprise.
+    private var summaryCard: some View {
         VStack(spacing: 0) {
             statRow("Pages", value: "\(report.pageCount)")
             Divider()
             statRow("Chapters", value: "\(report.chapterCount)")
             Divider()
-            statRow("Headings", value: "\(report.headingCount)")
+            statRow("Words", value: report.wordCountEpub.formatted(.number))
+
             if report.footnoteCount > 0 {
                 Divider()
-                // How many notes are actually reachable matters more than how
-                // many exist, so both numbers are shown together.
                 statRow(
-                    "Footnotes",
-                    value: "\(report.footnotesLinked) linked / \(report.footnoteCount)",
-                    valueColor: report.footnotesLinked < report.footnoteCount ? .orange : .secondary
+                    "Tappable footnotes",
+                    value: "\(report.footnotesLinked) of \(report.footnoteCount)"
                 )
             }
-            if report.endnoteCount > 0 {
-                Divider()
-                statRow(
-                    "Endnotes",
-                    value: "\(report.endnotesLinked) linked / \(report.endnoteCount)",
-                    valueColor: report.endnotesLinked < report.endnoteCount ? .orange : .secondary
-                )
-            }
-            if report.imageCount > 0 {
-                Divider()
-                statRow("Images", value: "\(report.imageCount)")
-            }
-            if report.tableCount > 0 {
-                Divider()
-                statRow("Tables", value: "\(report.tableCount)")
-            }
-            if report.formulaCount > 0 {
-                Divider()
-                statRow("Equations", value: "\(report.formulaCount)")
-            }
-            if report.verseCount > 0 {
-                Divider()
-                statRow("Verse passages", value: "\(report.verseCount)")
-            }
-            Divider()
-            statRow("Words", value: "\(report.wordCountEpub)")
-        }
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-    }
 
-    private var validationCard: some View {
-        VStack(spacing: 0) {
-            statRow(
-                "EPUB3 validation",
-                value: report.epubcheckPassed ? "Pass" : "Fail",
-                valueColor: report.epubcheckPassed ? .green : .red
-            )
-            Divider()
-            statRow(
-                "Content integrity",
-                value: percent(report.contentIntegrityRatio),
-                valueColor: report.contentIntegritySuspicious ? .orange : .secondary
-            )
+            // Shown only for scanned books. Machine-read text can contain
+            // mistakes no checker will catch, and a reader who does not know
+            // the pages were read by OCR has no reason to be sceptical of them.
             if report.ocrPageCount > 0 {
                 Divider()
                 statRow("Pages read by OCR", value: "\(report.ocrPageCount)")
-                if let confidence = report.ocrMeanConfidence {
-                    Divider()
-                    statRow("OCR confidence", value: String(format: "%.0f%%", confidence))
-                }
             }
-            if report.imageFallbackCount > 0 {
-                Divider()
-                statRow("Preserved as images", value: "\(report.imageFallbackCount)")
-            }
-            if report.rtlBlockCount > 0 {
-                Divider()
-                statRow("Right-to-left passages", value: "\(report.rtlBlockCount)")
-            }
-            if report.textCorrections > 0 {
-                Divider()
-                statRow("Text corrections", value: "\(report.textCorrections)")
-            }
-            if report.suspiciousPassages > 0 {
-                Divider()
-                // Detected but deliberately not altered — shown so the reader
-                // knows where the scan is doubtful rather than being told all is well.
-                statRow(
-                    "Passages left as found",
-                    value: "\(report.suspiciousPassages)",
-                    valueColor: .orange
-                )
-            }
+
+            // Always shown. It is the app's central claim — that a book is
+            // converted by deterministic software and never sent to an AI
+            // service — and the App Review notes tell the reviewer they will
+            // find exactly this row. Removing it would make those notes untrue.
             Divider()
-            statRow("Quality score", value: String(format: "%.1f", report.qualityScore))
-            Divider()
-            statRow("AI assistance", value: report.aiProviderUsed == "none" ? "None (fully local)" : report.aiProviderUsed.capitalized)
+            statRow("AI assistance", value: aiSummary)
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .overlay(alignment: .bottom) { validationBadge.offset(y: 30) }
+        .padding(.bottom, 30)
     }
 
-    /// Surfaced rather than hidden: structural shortfalls and unexpected content
-    /// loss are reported, never silently presented as a clean success.
+    private var aiSummary: String {
+        report.aiProviderUsed == "none"
+            ? "None (fully local)"
+            : report.aiProviderUsed.capitalized
+    }
+
+    /// A quiet mark that the file is a valid EPUB3, which is worth knowing and
+    /// takes one line rather than a card.
     @ViewBuilder
-    private var integrityWarningCard: some View {
-        if needsReview {
-            VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
-                Label("About this conversion", systemImage: "info.circle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("Your book is ready to read. A few passages in the source were ambiguous, so they were kept exactly as written rather than rewritten — nothing has been invented or changed.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(reviewNotes, id: \.self) { note in
-                    Text("• \(note)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardBackground()
-            .accessibilityElement(children: .combine)
+    private var validationBadge: some View {
+        if report.epubcheckPassed {
+            Label("Validated EPUB3", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
-    private var reviewNotes: [String] {
-        var notes = report.reviewReasons
-        if notes.isEmpty { notes = report.contentIntegrityNotes }
-        return Array(notes.prefix(4))
+    // MARK: - Actions
+
+    private var actions: some View {
+        VStack(spacing: Theme.Spacing.tight) {
+            Button {
+                sendToKindle()
+            } label: {
+                Label("Send to Kindle", systemImage: "books.vertical.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .accessibilityIdentifier("result.sendToKindle")
+            .accessibilityHint(Text(KindleHandoff.handoffExplanation))
+
+            Button("Preview EPUB") { isPreviewPresented = true }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("result.preview")
+
+            Button { isSharePresented = true } label: {
+                Label("Share or Export", systemImage: "square.and.arrow.up")
+                    .font(.body.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.regular)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.button, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
+                    )
+                    .foregroundStyle(Color.primary)
+            }
+            .accessibilityIdentifier("result.share")
+
+            Button("Convert another PDF", action: onConvertAnother)
+                .buttonStyle(.plain)
+                .font(.footnote)
+                .foregroundStyle(Color.accentColor)
+                .padding(.top, 2)
+                .accessibilityIdentifier("result.convertAnother")
+        }
+        .padding(Theme.Spacing.regular)
+        .background(.bar)
     }
 
-    private func percent(_ ratio: Double) -> String {
-        String(format: "%.1f%%", ratio * 100)
+    /// Offer the book to the apps that can open it. If nothing on the device
+    /// can — Kindle not installed, no other reader — fall back to the full
+    /// share sheet so the button always does something useful.
+    private func sendToKindle() {
+        if !KindleHandoff.presentOpenIn(url: epubURL, title: bookTitle) {
+            isSharePresented = true
+        }
     }
 
-    private func statRow(_ label: String, value: String, valueColor: Color = .secondary) -> some View {
+    // MARK: - Rows
+
+    private func statRow(_ label: String, value: String) -> some View {
         HStack {
             Text(label)
                 .font(.subheadline)
             Spacer()
             Text(value)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(valueColor)
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
         .padding(.horizontal, Theme.Spacing.regular)
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label): \(value)")
     }
 }

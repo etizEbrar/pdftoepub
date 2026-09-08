@@ -72,14 +72,68 @@ enum KindleHandoff {
         return UIApplication.shared.canOpenURL(url)
     }
 
-    /// Amazon publishes no URL scheme for handing a *file* to Kindle — the
-    /// documented route is the system share sheet, where Kindle registers as a
-    /// handler for EPUB. So this deliberately opens the share sheet rather than
-    /// attempting a direct hand-off that would silently do nothing.
+    /// Amazon publishes no URL scheme that accepts a *file*, so "kindle://"
+    /// can only answer whether the app exists — it cannot carry the book. The
+    /// supported hand-off is the system's Open In menu, which lists exactly the
+    /// apps able to open an EPUB and nothing else.
     static var handoffExplanation: String {
         isKindleInstalled
             ? "Choose Kindle to add this book to your library."
             : "Install the Kindle app, or choose Mail to send it to your Send-to-Kindle address."
+    }
+
+    /// Offer the book to the apps that can open it, Kindle among them.
+    ///
+    /// Presented directly from the window rather than through a SwiftUI sheet:
+    /// UIDocumentInteractionController must outlive the call that shows it, and
+    /// a representable wrapper makes that lifetime harder to get right than it
+    /// needs to be. Returns false when nothing on the device can open an EPUB,
+    /// so the caller can fall back to the full share sheet rather than leaving
+    /// a button that appears to do nothing.
+    @MainActor
+    @discardableResult
+    static func presentOpenIn(url: URL, title: String) -> Bool {
+        guard let host = topViewController() else { return false }
+
+        let controller = UIDocumentInteractionController(url: url)
+        controller.uti = UTType.epub.identifier
+        controller.name = title
+        let holder = InteractionHolder.shared
+        holder.controller = controller
+        controller.delegate = holder
+
+        let shown = controller.presentOpenInMenu(
+            from: CGRect(x: host.view.bounds.midX, y: host.view.bounds.maxY, width: 0, height: 0),
+            in: host.view,
+            animated: true
+        )
+        if !shown { holder.controller = nil }
+        return shown
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        var top = scene?.keyWindow?.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+}
+
+/// Keeps the interaction controller alive for as long as its menu is on screen.
+/// Without a strong reference it is deallocated the moment the presenting
+/// function returns and the menu disappears immediately.
+private final class InteractionHolder: NSObject, UIDocumentInteractionControllerDelegate {
+    static let shared = InteractionHolder()
+    var controller: UIDocumentInteractionController?
+
+    func documentInteractionControllerDidDismissOpenInMenu(
+        _ controller: UIDocumentInteractionController
+    ) {
+        self.controller = nil
     }
 }
 
