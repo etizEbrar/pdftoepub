@@ -535,6 +535,37 @@ def _nav_xhtml(
 """
 
 
+def _toc_ncx(chapters: list["Chapter"], title: str, identifier: str) -> str:
+    """The EPUB 2 navigation document.
+
+    EPUB 3 replaced NCX with nav.xhtml and EPUBCheck is happy without it, but
+    Amazon's ingestion and older Kindle firmware still read NCX, and a book
+    without one can arrive on the device with no working table of contents at
+    all. It costs one small file to satisfy both, so both are shipped.
+    """
+    points = []
+    for order, ch in enumerate(chapters, start=1):
+        points.append(
+            f'<navPoint id="navpoint-{order}" playOrder="{order}">'
+            f"<navLabel><text>{xml_escape(ch.title)}</text></navLabel>"
+            f'<content src="text/{xml_escape(ch.filename)}"/>'
+            f"</navPoint>"
+        )
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n'
+        "<head>"
+        f'<meta name="dtb:uid" content="{xml_escape(identifier)}"/>'
+        '<meta name="dtb:depth" content="1"/>'
+        '<meta name="dtb:totalPageCount" content="0"/>'
+        '<meta name="dtb:maxPageNumber" content="0"/>'
+        "</head>\n"
+        f"<docTitle><text>{xml_escape(title)}</text></docTitle>\n"
+        "<navMap>" + "".join(points) + "</navMap>\n"
+        "</ncx>\n"
+    )
+
+
 def _container_xml() -> str:
     return """<?xml version="1.0" encoding="utf-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -561,6 +592,9 @@ def _content_opf(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest_items = [
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+        # The EPUB 2 table of contents, for Amazon's ingestion and older Kindle
+        # firmware. Harmless to an EPUB 3 reader, which uses nav.xhtml instead.
+        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
         '<item id="css" href="css/style.css" media-type="text/css"/>',
     ]
     spine_items = []
@@ -599,7 +633,7 @@ def _content_opf(
 <manifest>
 {chr(10).join(manifest_items)}
 </manifest>
-<spine page-progression-direction="{direction.value}">
+<spine toc="ncx" page-progression-direction="{direction.value}">
 {chr(10).join(spine_items)}
 </spine>
 </package>
@@ -668,6 +702,7 @@ def build_epub(
                 zf.writestr(f"OEBPS/images/{ref}.{img['ext']}", src_path.read_bytes())
 
         zf.writestr("OEBPS/nav.xhtml", _nav_xhtml(chapters, lang, title, direction))
+        zf.writestr("OEBPS/toc.ncx", _toc_ncx(chapters, title, identifier))
         zf.writestr(
             "OEBPS/content.opf",
             _content_opf(

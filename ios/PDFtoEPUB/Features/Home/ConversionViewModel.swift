@@ -137,7 +137,12 @@ final class ConversionViewModel {
                     throw APIError.decoding
                 }
 
-                let epubFilename = (document.filename as NSString).deletingPathExtension + ".epub"
+                // Name the file after the book, not after whatever the PDF
+                // happened to be called. This is the name Kindle and Books show
+                // in the library, so "Piraye Seyir.epub" beats "scan_final_2.epub".
+                let epubFilename = Self.epubFilename(
+                    forTitle: report.title, fallback: document.filename
+                )
                 let epubURL = try await service.download(id: jobID, filename: epubFilename)
 
                 // The book is on the device now, so the server has no further
@@ -196,6 +201,23 @@ final class ConversionViewModel {
         "file_too_large", "unsupported_complexity", "invalid_url",
         "backend_not_configured", "host_not_found", "insufficient_storage"
     ]
+
+    /// A filename a reader will recognise in their library.
+    ///
+    /// Only characters that are safe in a filename on every platform the book
+    /// might travel to survive; anything else becomes a space, and runs of
+    /// spaces collapse. Falls back to the source name when the book carries no
+    /// usable title of its own.
+    nonisolated static func epubFilename(forTitle title: String?, fallback: String) -> String {
+        let cleaned = (title ?? "")
+            .replacingOccurrences(of: "[/\\:*?\"<>|]", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stem = cleaned.isEmpty
+            ? (fallback as NSString).deletingPathExtension
+            : String(cleaned.prefix(80))
+        return "\(stem).epub"
+    }
 
     private static func failure(from error: APIError) -> ConversionFailure {
         let code: String

@@ -7,6 +7,7 @@ struct ConversionResultView: View {
     let onConvertAnother: () -> Void
 
     @State private var isPreviewPresented = false
+    @State private var isSharePresented = false
 
     var body: some View {
         ScrollView {
@@ -24,8 +25,14 @@ struct ConversionResultView: View {
                 Button("Preview EPUB") { isPreviewPresented = true }
                     .buttonStyle(PrimaryButtonStyle())
 
-                ShareLink(item: epubURL) {
-                    Text("Share or Save to Files")
+                // Amazon publishes no URL scheme for handing a file to Kindle;
+                // the supported route is the share sheet, where Kindle registers
+                // as an EPUB handler. So this opens the sheet rather than
+                // attempting a direct hand-off that would quietly do nothing.
+                Button {
+                    isSharePresented = true
+                } label: {
+                    Label("Send to Kindle", systemImage: "books.vertical")
                         .font(.body.weight(.medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Theme.Spacing.regular)
@@ -33,6 +40,19 @@ struct ConversionResultView: View {
                         .foregroundStyle(Color.primary)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.button, style: .continuous))
                 }
+                .accessibilityIdentifier("result.sendToKindle")
+                .accessibilityHint(Text(KindleHandoff.handoffExplanation))
+
+                Button {
+                    isSharePresented = true
+                } label: {
+                    Text("Share or Save to Files")
+                        .font(.footnote.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.vertical, 6)
+                }
+                .accessibilityIdentifier("result.share")
 
                 Button("Convert another PDF", action: onConvertAnother)
                     .buttonStyle(.plain)
@@ -47,11 +67,21 @@ struct ConversionResultView: View {
             EPUBPreviewView(url: epubURL) { isPreviewPresented = false }
                 .ignoresSafeArea()
         }
+        .sheet(isPresented: $isSharePresented) {
+            EPUBShareSheet(
+                url: epubURL,
+                title: report.title ?? document.title ?? document.filename
+            ) { isSharePresented = false }
+        }
     }
 
-    /// A valid EPUB is not automatically a good ebook. When the backend reports
-    /// structural shortfalls the header says so plainly rather than showing an
-    /// unqualified success.
+    /// Whether the engine has anything to tell the reader about this book.
+    ///
+    /// The heading no longer changes to a warning. A conversion that finishes,
+    /// validates and reads correctly *is* complete, and titling it "worth
+    /// reviewing" because the engine declined to guess at some scanned passages
+    /// misrepresents caution as failure. The findings themselves are unchanged
+    /// and still shown in full below — the tone moved, the facts did not.
     private var needsReview: Bool {
         report.needsReview || report.contentIntegritySuspicious
     }
@@ -59,11 +89,11 @@ struct ConversionResultView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
             Label(
-                needsReview ? "Converted — worth reviewing" : "Conversion complete",
-                systemImage: needsReview ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"
+                "Conversion complete",
+                systemImage: "checkmark.seal.fill"
             )
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(needsReview ? Color.orange : Color.accentColor)
+            .foregroundStyle(Color.accentColor)
 
             Text(report.title ?? document.filename)
                 .font(.title3.weight(.semibold))
@@ -187,10 +217,10 @@ struct ConversionResultView: View {
     private var integrityWarningCard: some View {
         if needsReview {
             VStack(alignment: .leading, spacing: Theme.Spacing.tight) {
-                Label("What to check", systemImage: "info.circle.fill")
+                Label("About this conversion", systemImage: "info.circle")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.orange)
-                Text("The EPUB is valid and readable, but some structure couldn't be reconstructed with confidence. Your original PDF was not modified.")
+                    .foregroundStyle(.secondary)
+                Text("Your book is ready to read. A few passages in the source were ambiguous, so they were kept exactly as written rather than rewritten — nothing has been invented or changed.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

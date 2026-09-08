@@ -112,3 +112,84 @@ final class DataLifecycleTests: XCTestCase {
         )
     }
 }
+
+/// The finished book is named after the book, not after the PDF it came from.
+/// That name is what Kindle and Apple Books show in the library.
+final class EPUBFilenameTests: XCTestCase {
+    func testTheBookTitleBecomesTheFilename() {
+        let name = ConversionViewModel.epubFilename(
+            forTitle: "Piraye Seyir", fallback: "scan_final_2.pdf"
+        )
+        XCTAssertEqual(name, "Piraye Seyir.epub")
+    }
+
+    func testTurkishCharactersSurvive() {
+        let name = ConversionViewModel.epubFilename(
+            forTitle: "Sisin Ardındaki Şehir", fallback: "x.pdf"
+        )
+        XCTAssertEqual(name, "Sisin Ardındaki Şehir.epub")
+    }
+
+    func testCharactersThatBreakFilenamesAreRemoved() {
+        let name = ConversionViewModel.epubFilename(
+            forTitle: "A/B: C*D?E\"F<G>H|I", fallback: "x.pdf"
+        )
+        for bad in ["/", ":", "*", "?", "\"", "<", ">", "|", "\\"] {
+            XCTAssertFalse(name.contains(bad), "\(bad) survived into \(name)")
+        }
+        XCTAssertTrue(name.hasSuffix(".epub"))
+        XCTAssertFalse(name.contains("  "), "runs of spaces were not collapsed")
+    }
+
+    func testAnUntitledBookFallsBackToTheSourceName() {
+        XCTAssertEqual(
+            ConversionViewModel.epubFilename(forTitle: nil, fallback: "my_scan.pdf"),
+            "my_scan.epub"
+        )
+        XCTAssertEqual(
+            ConversionViewModel.epubFilename(forTitle: "   ", fallback: "my_scan.pdf"),
+            "my_scan.epub"
+        )
+    }
+
+    func testAVeryLongTitleIsTruncatedButStillValid() {
+        let name = ConversionViewModel.epubFilename(
+            forTitle: String(repeating: "A", count: 400), fallback: "x.pdf"
+        )
+        XCTAssertLessThanOrEqual(name.count, 90)
+        XCTAssertTrue(name.hasSuffix(".epub"))
+    }
+}
+
+/// The share sheet must declare what it is handing over, or Kindle and Books
+/// do not offer themselves.
+final class EPUBSharingTests: XCTestCase {
+    func testTheItemSourceDeclaresTheEPUBType() {
+        let url = URL(fileURLWithPath: "/tmp/Book.epub")
+        let source = EPUBActivityItemSource(url: url, title: "Book")
+        let controller = UIActivityViewController(activityItems: [source], applicationActivities: nil)
+
+        XCTAssertEqual(
+            source.activityViewController(controller, dataTypeIdentifierForActivityType: nil),
+            "org.idpf.epub-container",
+            "the EPUB type identifier is what makes Kindle offer itself"
+        )
+    }
+
+    func testTheItemIsTheFileItselfSoTheNameSurvives() {
+        let url = URL(fileURLWithPath: "/tmp/Piraye Seyir.epub")
+        let source = EPUBActivityItemSource(url: url, title: "Piraye Seyir")
+        let controller = UIActivityViewController(activityItems: [source], applicationActivities: nil)
+
+        XCTAssertEqual(source.activityViewController(controller, itemForActivityType: nil) as? URL, url)
+        XCTAssertEqual(source.activityViewControllerPlaceholderItem(controller) as? URL, url)
+        XCTAssertEqual(
+            source.activityViewController(controller, subjectForActivityType: nil),
+            "Piraye Seyir"
+        )
+    }
+
+    func testTheHandoffAlwaysExplainsItself() {
+        XCTAssertFalse(KindleHandoff.handoffExplanation.isEmpty)
+    }
+}

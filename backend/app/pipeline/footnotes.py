@@ -23,9 +23,40 @@ ITALIC_OPEN = ""
 ITALIC_CLOSE = ""
 EMPHASIS_SENTINELS = (BOLD_OPEN, BOLD_CLOSE, ITALIC_OPEN, ITALIC_CLOSE)
 
-_MARKER_TEXT_RE = re.compile(r"^[\d*†‡§¶#]{1,3}$")
+# Superscript digits are ordinary digits wearing a different codepoint. A book
+# that sets its markers as "¹" rather than "1" was previously unmatchable on
+# both sides at once, so none of its notes could ever link.
+_SUPERSCRIPT_DIGITS = str.maketrans("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079", "0123456789")
+
+# One marker, however the typesetter dressed it: 1, [1], (1), 1., 1), ¹, *, ††.
+# The brackets and trailing punctuation are decoration; the identity is what is
+# inside. Matching on the decorated form meant "[1]" in the text and "[1]" in
+# the note were two different strings to the engine.
+_MARKER_SHAPE_RE = re.compile(
+    r"^[\[\(\{<]?\s*(\d{1,3}|[*†‡§¶#]{1,3})\s*[\]\)\}>]?\s*[.:\)]?$"
+)
+
+
+def normalise_marker(text: str) -> str | None:
+    """Reduce a marker to its bare identity, or None if it is not a marker.
+
+    "[1]", "(1)", "1.", "1)", "¹" all reduce to "1"; "*" and "††" to themselves.
+    Used on both the reference in the text and the number on the note body, so
+    the two are compared in the same form.
+    """
+    collapsed = " ".join(text.split()).translate(_SUPERSCRIPT_DIGITS)
+    match = _MARKER_SHAPE_RE.match(collapsed)
+    return match.group(1) if match else None
+
+
+_MARKER_TEXT_RE = re.compile(r"^[\d*†‡§¶#\u2070\u00b9\u00b2\u00b3\u2074-\u2079\[\]\(\)\{\}<>.:]{1,6}$")
 MARKER_SCAN_RE = re.compile(f"{MARKER_OPEN}(.*?){MARKER_CLOSE}")
-_FOOTNOTE_PREFIX_RE = re.compile(r"^\s*([\d*†‡§¶#]{1,3})[.\)]?\s+(.*)$", re.DOTALL)
+# The same set of shapes, at the head of a note body: "1 text", "[1] text",
+# "(1) text", "1. text", "¹ text", "* text".
+_FOOTNOTE_PREFIX_RE = re.compile(
+    r"^\s*[\[\(\{]?\s*(\d{1,3}|[*†‡§¶#]{1,3})\s*[\]\)\}]?[.\):]?\s+(.*)$",
+    re.DOTALL,
+)
 
 _SUPERSCRIPT_SIZE_RATIO = 0.75
 
@@ -264,9 +295,9 @@ def link_references(
     for node in nodes:
         if node.role != BlockRole.FOOTNOTE:
             continue
-        m = _FOOTNOTE_PREFIX_RE.match(node.text)
+        m = _FOOTNOTE_PREFIX_RE.match(node.text.translate(_SUPERSCRIPT_DIGITS))
         if m:
-            node.footnote_number = m.group(1)
+            node.footnote_number = normalise_marker(m.group(1)) or m.group(1)
             node.text = m.group(2).strip()
         else:
             node.footnote_number = None
@@ -283,7 +314,10 @@ def link_references(
 
         def _replace(match: re.Match) -> str:
             nonlocal linked, ref_counter
-            marker = match.group(1)
+            raw_marker = match.group(1)
+            # Compare identities, not decoration: "[1]" in the text and "1" on
+            # the note are the same reference.
+            marker = normalise_marker(raw_marker) or raw_marker
             candidates_pages = [node.page, (node.page or 0) + 1] if node.page is not None else []
             target = None
             for p in candidates_pages:
@@ -295,13 +329,15 @@ def link_references(
                     return match.group(0)  # keep the sentinel for endnote linking
                 # No matching footnote body found — render as plain superscript
                 # text rather than a broken link (zero-hallucination fallback).
-                return f"{{{{SUP:{marker}}}}}"
+                return f"{{{{SUP:{raw_marker}}}}}"
             ref_counter += 1
             ref_id = f"fnref_{target.node_id}_{ref_counter}"
             node.footnote_targets.append(target.node_id)
             target.footnote_backrefs.append(ref_id)
             linked += 1
-            return f"{{{{NOTEREF:{target.node_id}:{ref_id}:{marker}}}}}"
+            # The reader sees the marker exactly as the book set it; only the
+            # matching used the normalised form.
+            return f"{{{{NOTEREF:{target.node_id}:{ref_id}:{raw_marker}}}}}"
 
         node.text = MARKER_SCAN_RE.sub(_replace, node.text)
 

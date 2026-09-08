@@ -56,6 +56,12 @@ targets:
               NSIncludesSubdomains: false
         NSLocalNetworkUsageDescription: PDF to EPUB connects to the conversion server you run on your own computer to convert your PDFs.
         ITSAppUsesNonExemptEncryption: false
+        # Asked only so the Send to Kindle button can word itself correctly when
+        # Kindle is present. Without the entry canOpenURL always answers false,
+        # which degrades to offering the share sheet — never to a broken button.
+        LSApplicationQueriesSchemes:
+          - kindle
+          - ebook
         # Follow the build settings rather than carrying their own copy. A
         # literal here silently overrode CURRENT_PROJECT_VERSION, so bumping the
         # build number produced an archive still stamped with the old one.
