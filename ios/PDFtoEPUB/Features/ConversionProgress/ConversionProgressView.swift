@@ -5,6 +5,20 @@ struct ConversionProgressView: View {
     let progress: ConversionProgress?
     let onCancel: () -> Void
 
+    /// True once the first reply has been slow enough to need explaining.
+    ///
+    /// The conversion server sleeps when idle and takes up to a minute to wake.
+    /// Until the first progress arrives there is genuinely nothing to report, so
+    /// the screen sat on "Uploading…" behind an indeterminate bar and read as a
+    /// hang. Saying what is actually happening costs nothing and is true; a
+    /// synthetic progress animation would not be.
+    @State private var waitingLongerThanUsual = false
+
+    /// Long enough that a warm server never shows the message — it replies in
+    /// about a second — and short enough that a cold one explains itself well
+    /// before a person decides the app is broken.
+    private static let explainWaitAfter = Duration.seconds(6)
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.loose) {
             header
@@ -47,9 +61,18 @@ struct ConversionProgressView: View {
             } else {
                 ProgressView()
                     .progressViewStyle(.linear)
-                Text("Uploading…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                Text(
+                    waitingLongerThanUsual
+                        ? "Waking the conversion server. The first conversion "
+                          + "after a quiet period can take up to a minute."
+                        : "Uploading…"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .task {
+                    try? await Task.sleep(for: Self.explainWaitAfter)
+                    waitingLongerThanUsual = true
+                }
             }
         }
         .cardBackground()
