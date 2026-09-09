@@ -7,6 +7,8 @@ be read. These tests fail if any stage emits one the source did not contain.
 
 import re
 
+import pytest
+
 from app.models.document import Block, BlockRole, Span, StructuralNode
 from app.pipeline.footnotes import link_references, mark_reference_candidates
 from app.pipeline.hyphenation import join_lines_with_hyphenation_repair
@@ -181,33 +183,56 @@ def test_classification_never_introduces_dots_into_body_text():
 
 # --- malformed terminal punctuation is surfaced, never rewritten -------------
 
-def test_a_terminal_mark_with_two_dots_is_flagged_but_left_as_found():
-    """"?.." has no typographic reading, but "?..." and "?." are both plausible
-    repairs — so it is reported and preserved, not guessed at."""
-    from app.models.document import Block
-    from app.pipeline.textrepair import CorrectionKind, repair_blocks
+def test_a_two_dot_ellipsis_after_a_terminal_mark_is_completed():
+    """"?.." is an ellipsis that lost a dot leaving the PDF, and is completed.
 
-    text = "Neden?.. dedi ve sustu. Hayır!.. diye bağırdı."
+    This is the single place the engine writes punctuation the source did not
+    contain. It was added deliberately and on instruction; the guards below fix
+    its scope so it cannot grow into general punctuation rewriting.
+    """
+    from app.models.document import Block
+    from app.pipeline.textrepair import repair_blocks
+
+    block = Block(block_id="b1", page=1, page_width=612, page_height=792,
+                  bbox=(72, 100, 500, 120), kind="text",
+                  text="Neden?.. dedi ve sustu. Hayır!.. diye bağırdı.", spans=[],
+                  font="Helvetica", font_size=11.0)
+    repair_blocks([block])
+
+    assert block.text == "Neden?... dedi ve sustu. Hayır!... diye bağırdı."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Neden?... dedi.",          # already three dots
+        "Neden?\u2026 dedi.",           # already a real ellipsis character
+        "Neden?. dedi.",            # one dot — could be a full stop, not ours to judge
+        "Bekledi. . . sonra.",      # spaced ellipsis, author's own typography
+        "Bekledi... sonra.",        # plain ellipsis with no terminal mark
+        "Bir soru?.... dört.",      # four dots — not the pattern
+        "Ne? dedi.",                # nothing to complete
+    ],
+)
+def test_punctuation_the_author_may_have_meant_is_left_alone(text):
+    """The completion is narrow by design: exactly two dots, nothing else."""
+    from app.models.document import Block
+    from app.pipeline.textrepair import repair_blocks
+
     block = Block(block_id="b1", page=1, page_width=612, page_height=792,
                   bbox=(72, 100, 500, 120), kind="text", text=text, spans=[],
                   font="Helvetica", font_size=11.0)
-    report = repair_blocks([block])
-
-    assert block.text == text, "the malformed sequence was rewritten"
-    flagged = [c for c in report.rejected if c.kind is CorrectionKind.SUSPICIOUS
-               and "two dots" in c.reason]
-    assert len(flagged) == 2, f"expected both ?.. and !.. flagged, got {len(flagged)}"
+    repair_blocks([block])
+    assert block.text == text, f"{text!r} was altered"
 
 
-def test_genuine_ellipsis_after_a_terminal_mark_is_not_flagged():
-    """"?..." and "?…" are real punctuation and must produce no report entry."""
+def test_the_completion_is_recorded_as_a_correction():
+    """A change to the author's text must appear in the report, not happen quietly."""
     from app.models.document import Block
-    from app.pipeline.textrepair import CorrectionKind, repair_blocks
+    from app.pipeline.textrepair import repair_blocks
 
-    for text in ["Neden?... dedi.", "Neden?… dedi.", "Hayır!... dedi.", "Bekledi. . . sonra."]:
-        block = Block(block_id="b1", page=1, page_width=612, page_height=792,
-                      bbox=(72, 100, 500, 120), kind="text", text=text, spans=[],
-                      font="Helvetica", font_size=11.0)
-        report = repair_blocks([block])
-        assert block.text == text, f"{text!r} was altered"
-        assert not [c for c in report.rejected if "two dots" in c.reason], f"{text!r} was flagged"
+    block = Block(block_id="b1", page=1, page_width=612, page_height=792,
+                  bbox=(72, 100, 500, 120), kind="text", text="Neden?.. dedi.", spans=[],
+                  font="Helvetica", font_size=11.0)
+    report = repair_blocks([block])
+    assert report.applied_count >= 1, "the rewrite was not reported"

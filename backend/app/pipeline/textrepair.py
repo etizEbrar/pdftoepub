@@ -334,6 +334,15 @@ _SPACE_BEFORE_PERIOD = re.compile(r"(?<=[^\s.])\s+\.(?!\s*\.)")
 # "sevgim .Yılmaz" -> a full stop with no space after it, mid-sentence.
 _MISSING_SPACE_AFTER = re.compile(r"([,;:])(?=[^\W\d_])")
 _REPEATED_PUNCT = re.compile(r"([,;:!?])\1{1,}")
+# "?.." and "!.." — a terminal mark followed by exactly two dots. No typographic
+# convention produces this; it is an ellipsis that lost a dot on the way out of
+# the PDF. Completed to the three-dot form on instruction.
+#
+# This is the one place the engine completes punctuation rather than preserving
+# it, so it is kept as narrow as the rule allows: exactly two dots, not one and
+# not three, and never when a third dot or an existing ellipsis follows. "?...",
+# "?…", "?." and ". . ." are all left exactly as the author set them.
+_TERMINAL_MARK_LOST_DOT = re.compile(r"([?!])\.\.(?![.\u2026])")
 
 
 def _normalise_text(text: str) -> tuple[str, list[tuple[CorrectionKind, str, str, str]]]:
@@ -363,6 +372,18 @@ def _normalise_text(text: str) -> tuple[str, list[tuple[CorrectionKind, str, str
             )
         )
     text = recovered
+
+    completed = _TERMINAL_MARK_LOST_DOT.sub(r"\1...", text)
+    if completed != text:
+        changes.append(
+            (
+                CorrectionKind.PUNCTUATION_SPACING,
+                text,
+                completed,
+                "completed a two-dot ellipsis after a terminal mark",
+            )
+        )
+    text = completed
 
     stripped = _CONTROL_CHARS.sub("", text)
     if stripped != text:
@@ -671,12 +692,6 @@ _SUSPICIOUS_PATTERNS = (
     (re.compile(r"[^\W\d_]\d[^\W\d_]"), "digit inside a word"),
     (re.compile(r"[a-zçğıöşü][A-ZÇĞİÖŞÜ][a-zçğıöşü]"), "case flip inside a word"),
     (re.compile(r"(.)\1{3,}"), "character repeated four or more times"),
-    # "?.." and "!.." — a terminal mark followed by exactly two dots. No
-    # typographic convention produces this; it is an ellipsis that lost a dot in
-    # extraction, or a stray dot after a full stop. But which one is a guess:
-    # "?..." and "?." are both plausible, so it is flagged for the report and
-    # left as found. "?..." and "?…" are genuine and are not matched.
-    (re.compile(r"[?!]\.\.(?![.\u2026])"), "terminal mark followed by two dots"),
 )
 
 

@@ -14,7 +14,7 @@ settings:
     DEVELOPMENT_TEAM: "23766BZUS5"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "5"
+    CURRENT_PROJECT_VERSION: "6"
     # Address of the hosted conversion backend. Deliberately empty: no backend
     # is deployed yet, and shipping a placeholder would produce a build that
     # fails mysteriously instead of one that asks the user for an address.
