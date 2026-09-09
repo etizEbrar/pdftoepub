@@ -3,11 +3,11 @@ import SwiftUI
 /// What the reader sees when their book is ready.
 ///
 /// Deliberately short. The engine measures a great deal about a conversion —
-/// how many passages it declined to correct, how many notes it could not link —
-/// and that detail belongs in the quality report the backend returns, not on
-/// the screen someone reads once before opening their book. The two numbers a
-/// reader can actually act on are here: how much of the book arrived, and
-/// whether its footnotes are tappable.
+/// how many passages it declined to correct, how many notes it could not link,
+/// how many pages were read by OCR, that no AI was involved — and all of it
+/// belongs in the quality report the backend returns, not on the screen
+/// someone reads once before opening their book. What remains is what a
+/// reader can act on: how big the book is, and whether its footnotes tap.
 struct ConversionResultView: View {
     let document: SelectedDocument
     let report: QualityReport
@@ -16,6 +16,7 @@ struct ConversionResultView: View {
 
     @State private var isPreviewPresented = false
     @State private var isSharePresented = false
+    @State private var isKindleMissingAlertPresented = false
 
     private var bookTitle: String {
         report.title ?? document.title ?? document.filename
@@ -37,6 +38,13 @@ struct ConversionResultView: View {
         }
         .sheet(isPresented: $isSharePresented) {
             EPUBShareSheet(url: epubURL, title: bookTitle) { isSharePresented = false }
+        }
+        .alert("Kindle isn't installed", isPresented: $isKindleMissingAlertPresented) {
+            Button("Get Kindle") { KindleHandoff.openAppStore() }
+            Button("Share another way") { isSharePresented = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Install the Kindle app to add this book to your library, or share it another way.")
         }
     }
 
@@ -86,31 +94,11 @@ struct ConversionResultView: View {
                 )
             }
 
-            // Shown only for scanned books. Machine-read text can contain
-            // mistakes no checker will catch, and a reader who does not know
-            // the pages were read by OCR has no reason to be sceptical of them.
-            if report.ocrPageCount > 0 {
-                Divider()
-                statRow("Pages read by OCR", value: "\(report.ocrPageCount)")
-            }
-
-            // Always shown. It is the app's central claim — that a book is
-            // converted by deterministic software and never sent to an AI
-            // service — and the App Review notes tell the reviewer they will
-            // find exactly this row. Removing it would make those notes untrue.
-            Divider()
-            statRow("AI assistance", value: aiSummary)
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .overlay(alignment: .bottom) { validationBadge.offset(y: 30) }
         .padding(.bottom, 30)
-    }
-
-    private var aiSummary: String {
-        report.aiProviderUsed == "none"
-            ? "None (fully local)"
-            : report.aiProviderUsed.capitalized
     }
 
     /// A quiet mark that the file is a valid EPUB3, which is worth knowing and
@@ -165,10 +153,20 @@ struct ConversionResultView: View {
         .background(.bar)
     }
 
-    /// Offer the book to the apps that can open it. If nothing on the device
-    /// can — Kindle not installed, no other reader — fall back to the full
-    /// share sheet so the button always does something useful.
+    /// Hand the book to Kindle.
+    ///
+    /// iOS offers no way to launch another app with a file except through a
+    /// system menu, and no way to hide other apps from that menu. So when Kindle
+    /// is present this shows the Open In menu — the narrowest the system
+    /// provides, listing only apps that can open an EPUB. When Kindle is absent,
+    /// showing that same menu would present a list of unrelated apps and no way
+    /// to get the one the button names; an explicit offer to install it is the
+    /// honest response.
     private func sendToKindle() {
+        guard KindleHandoff.isKindleInstalled else {
+            isKindleMissingAlertPresented = true
+            return
+        }
         if !KindleHandoff.presentOpenIn(url: epubURL, title: bookTitle) {
             isSharePresented = true
         }

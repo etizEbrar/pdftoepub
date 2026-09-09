@@ -177,3 +177,37 @@ def test_classification_never_introduces_dots_into_body_text():
     nodes = classify_blocks(blocks)
     after = sum(_count_dots(n.text) for n in nodes)
     assert after == before
+
+
+# --- malformed terminal punctuation is surfaced, never rewritten -------------
+
+def test_a_terminal_mark_with_two_dots_is_flagged_but_left_as_found():
+    """"?.." has no typographic reading, but "?..." and "?." are both plausible
+    repairs — so it is reported and preserved, not guessed at."""
+    from app.models.document import Block
+    from app.pipeline.textrepair import CorrectionKind, repair_blocks
+
+    text = "Neden?.. dedi ve sustu. Hayır!.. diye bağırdı."
+    block = Block(block_id="b1", page=1, page_width=612, page_height=792,
+                  bbox=(72, 100, 500, 120), kind="text", text=text, spans=[],
+                  font="Helvetica", font_size=11.0)
+    report = repair_blocks([block])
+
+    assert block.text == text, "the malformed sequence was rewritten"
+    flagged = [c for c in report.rejected if c.kind is CorrectionKind.SUSPICIOUS
+               and "two dots" in c.reason]
+    assert len(flagged) == 2, f"expected both ?.. and !.. flagged, got {len(flagged)}"
+
+
+def test_genuine_ellipsis_after_a_terminal_mark_is_not_flagged():
+    """"?..." and "?…" are real punctuation and must produce no report entry."""
+    from app.models.document import Block
+    from app.pipeline.textrepair import CorrectionKind, repair_blocks
+
+    for text in ["Neden?... dedi.", "Neden?… dedi.", "Hayır!... dedi.", "Bekledi. . . sonra."]:
+        block = Block(block_id="b1", page=1, page_width=612, page_height=792,
+                      bbox=(72, 100, 500, 120), kind="text", text=text, spans=[],
+                      font="Helvetica", font_size=11.0)
+        report = repair_blocks([block])
+        assert block.text == text, f"{text!r} was altered"
+        assert not [c for c in report.rejected if "two dots" in c.reason], f"{text!r} was flagged"

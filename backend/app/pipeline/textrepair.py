@@ -671,6 +671,12 @@ _SUSPICIOUS_PATTERNS = (
     (re.compile(r"[^\W\d_]\d[^\W\d_]"), "digit inside a word"),
     (re.compile(r"[a-zçğıöşü][A-ZÇĞİÖŞÜ][a-zçğıöşü]"), "case flip inside a word"),
     (re.compile(r"(.)\1{3,}"), "character repeated four or more times"),
+    # "?.." and "!.." — a terminal mark followed by exactly two dots. No
+    # typographic convention produces this; it is an ellipsis that lost a dot in
+    # extraction, or a stray dot after a full stop. But which one is a guess:
+    # "?..." and "?." are both plausible, so it is flagged for the report and
+    # left as found. "?..." and "?…" are genuine and are not matched.
+    (re.compile(r"[?!]\.\.(?![.\u2026])"), "terminal mark followed by two dots"),
 )
 
 

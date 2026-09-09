@@ -82,6 +82,15 @@ enum KindleHandoff {
             : "Install the Kindle app, or choose Mail to send it to your Send-to-Kindle address."
     }
 
+    /// The Kindle listing on the App Store, for when the app is not installed.
+    /// Amazon Kindle's App Store identifier has been stable for over a decade.
+    static let appStoreURL = URL(string: "https://apps.apple.com/app/id302584613")!
+
+    @MainActor
+    static func openAppStore() {
+        UIApplication.shared.open(appStoreURL)
+    }
+
     /// Offer the book to the apps that can open it, Kindle among them.
     ///
     /// Presented directly from the window rather than through a SwiftUI sheet:

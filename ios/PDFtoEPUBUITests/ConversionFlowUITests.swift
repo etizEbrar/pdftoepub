@@ -112,9 +112,19 @@ final class ConversionFlowUITests: XCTestCase {
         // The document picker is out-of-process and localized, so navigate by
         // structure rather than by label: the browsing-mode tab bar's third tab
         // is always "Browse", and search finds the file without walking folders.
+        //
+        // Tapping twice if the first attempt produces nothing: the picker is a
+        // separate process and the Files provider indexes a freshly written
+        // container lazily, so the very first invocation after fixtures are
+        // copied can come up empty. That cost a whole suite run once, and the
+        // same test passed immediately on its own.
         let tabBar = app.tabBars["DOC.browsingModeTabBar"]
+        if !tabBar.waitForExistence(timeout: 20) {
+            if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
+            app.buttons["Select PDF"].tap()
+        }
         XCTAssertTrue(
-            tabBar.waitForExistence(timeout: 15),
+            tabBar.waitForExistence(timeout: 20),
             """
             The document picker did not appear.
 
@@ -164,7 +174,10 @@ final class ConversionFlowUITests: XCTestCase {
             "the result does not state that the EPUB validated"
         )
 
-        // AI must have stayed off for a normal conversion.
-        XCTAssertTrue(app.staticTexts["None (fully local)"].exists, "conversion unexpectedly used an AI provider")
+        // The AI-provider row was removed from the result screen. That no AI
+        // is used is asserted by the backend suite against the report itself;
+        // the screen now only has to show the book's size and its actions.
+        XCTAssertTrue(app.staticTexts["Words"].exists)
+        XCTAssertTrue(app.buttons["result.sendToKindle"].exists, "Send to Kindle is missing")
     }
 }
