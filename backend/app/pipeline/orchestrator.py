@@ -19,6 +19,7 @@ from app.pipeline import (
     footnotes,
     headers_footers,
     headings as headings_module,
+    hyphenation,
     paragraphs,
     reading_order,
     structure,
@@ -310,11 +311,21 @@ def _execute_pipeline(job: Job) -> None:
                 repair_report.rejected_count,
             )
 
+        # How this book spells the words it breaks at a line end. Built after
+        # text repair so corrections count, and from every block so a term set
+        # intact on one page can settle a break on another.
+        hyphen_evidence = hyphenation.HyphenEvidence(
+            b.text for b in all_blocks if b.kind == "text" and b.text
+        )
+
         nodes = structure.classify_blocks(ordered_blocks, furniture)
 
         blocks_by_id = {b.block_id: b for b in all_blocks}
-        # "1" set above "Kurban" is one chapter heading, not two.
-        headings_module.merge_division_numbers(nodes)
+        # "1" set above "Kurban" is one chapter heading, not two -- and where
+        # the title runs to several display lines, all of them are the title.
+        headings_module.merge_division_numbers(nodes, blocks_by_id)
+        # A title that wrapped is one heading, not one per line.
+        headings_module.merge_wrapped_titles(nodes, blocks_by_id)
         headings_module.assign_heading_levels(nodes)
 
         # Tables first: their cells are short, ragged-right lines that would
@@ -324,7 +335,9 @@ def _execute_pipeline(job: Job) -> None:
         detected_tables: list[tables_module.DetectedTable] = []
         for page_num, page in pages.items():
             detected_tables.extend(
-                tables_module.detect_tables_on_page(page, blocks_by_page.get(page_num, []))
+                tables_module.detect_tables_on_page(
+                    page, blocks_by_page.get(page_num, []), hyphen_evidence
+                )
             )
         tables_module.mark_continuations(detected_tables)
         semantic_tables, table_fallbacks = enrich.apply_tables(
@@ -335,7 +348,7 @@ def _execute_pipeline(job: Job) -> None:
         # punctuation, so the merger would otherwise fuse a poem into a single
         # prose paragraph and destroy the line breaks.
         verse_count = verse_module.detect_verse(nodes, blocks_by_id)
-        nodes = paragraphs.reconstruct_paragraphs(nodes)
+        nodes = paragraphs.reconstruct_paragraphs(nodes, hyphen_evidence)
 
         _update(job, detail="Detecting formulas")
         mathml_count, formula_fallbacks = enrich.apply_formulas(
@@ -348,10 +361,12 @@ def _execute_pipeline(job: Job) -> None:
 
         # Footnotes first (page-local), then endnotes (collected sections), then
         # anything still unmatched degrades to a plain superscript.
-        nodes, footnotes_linked = footnotes.link_references(nodes, leave_unmatched=True)
+        nodes, footnotes_linked = footnotes.link_references(
+            nodes, leave_unmatched=True, evidence=hyphen_evidence
+        )
         endnote_count = endnotes_module.classify_endnote_sections(nodes)
         endnotes_linked = endnotes_module.link_endnote_references(nodes)
-        unmatched_markers = footnotes.finalize_unmatched_markers(nodes)
+        unmatched_markers = footnotes.finalize_unmatched_markers(nodes, hyphen_evidence)
 
         if page_fallback_nodes:
             nodes = _merge_page_fallbacks(nodes, page_fallback_nodes)

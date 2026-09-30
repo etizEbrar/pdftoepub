@@ -2,6 +2,7 @@ from app.models.document import Block, BlockRole, Span, StructuralNode
 from app.pipeline.headings import (
     assign_heading_levels,
     merge_division_numbers,
+    merge_wrapped_titles,
     score_heading,
 )
 
@@ -191,3 +192,197 @@ def test_levels_never_exceed_four():
     nodes = [_heading_node(f"n{i}", f"H{i}", scale=4.0 - i * 0.5) for i in range(8)]
     assign_heading_levels(nodes)
     assert all(1 <= n.level <= 4 for n in nodes)
+
+
+class TestDisplayTitleBlocks:
+    """A chapter title set over several display lines is one title, not several.
+
+    Measured on a real 168-page Turkish edited volume: every chapter opens with
+    "BÖLÜM n" at 14pt over a bold 12pt title running two or three lines, then
+    the author names and DOI at the same 12pt but *not* bold. Folding only the
+    first line in truncated every title in the navigation ("BÖLÜM 5 ELEKTRİK
+    MOTORLARININ ARIZALARININ TESPİTİNDE", losing "YAPAY ZEKA YÖNTEMLERİNİN
+    KULLANILMASI"), and left the lines that failed to score as headings behind
+    as stray paragraphs. Boldness is what separates the title from the byline.
+    """
+
+    @staticmethod
+    def _node(node_id, text, role=BlockRole.PARAGRAPH, *, bold=False, page=94):
+        return StructuralNode(
+            node_id=node_id, role=role, text=text, page=page,
+            bold=bold, source_block_ids=[node_id],
+        )
+
+    @staticmethod
+    def _blocks(*specs):
+        return {
+            bid: Block(
+                block_id=bid, page=94, page_width=PAGE_W, page_height=PAGE_H,
+                bbox=(0, 0, 100, 10), kind="text", text=text,
+                font_size=size, bold=bold,
+            )
+            for bid, text, size, bold in specs
+        }
+
+    def test_every_bold_title_line_joins_the_division_number(self):
+        nodes = [
+            self._node("n1", "BÖLÜM 4", BlockRole.HEADING, bold=True),
+            self._node("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", bold=True),
+            self._node("n3", "ANAHTARLAMALI MOTOR ÇEŞİTLERİ ÜZERİNE BİR",
+                       BlockRole.HEADING, bold=True),
+            self._node("n4", "İNCELEME", bold=True),
+            self._node("n5", "Sümeyye ÇARKIT1,2"),
+        ]
+        blocks = self._blocks(
+            ("n1", "BÖLÜM 4", 14.0, True),
+            ("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", 12.0, True),
+            ("n3", "ANAHTARLAMALI MOTOR ÇEŞİTLERİ ÜZERİNE BİR", 12.0, True),
+            ("n4", "İNCELEME", 12.0, True),
+            ("n5", "Sümeyye ÇARKIT1,2", 12.0, False),
+        )
+        assert merge_division_numbers(nodes, blocks) == 1
+        assert nodes[0].text == (
+            "BÖLÜM 4 ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI "
+            "ANAHTARLAMALI MOTOR ÇEŞİTLERİ ÜZERİNE BİR İNCELEME"
+        )
+        assert nodes[0].role == BlockRole.HEADING
+
+    def test_the_byline_under_the_title_is_not_swallowed(self):
+        nodes = [
+            self._node("n1", "BÖLÜM 4", BlockRole.HEADING, bold=True),
+            self._node("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", bold=True),
+            self._node("n5", "Sümeyye ÇARKIT1,2"),
+        ]
+        blocks = self._blocks(
+            ("n1", "BÖLÜM 4", 14.0, True),
+            ("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", 12.0, True),
+            ("n5", "Sümeyye ÇARKIT1,2", 12.0, False),
+        )
+        merge_division_numbers(nodes, blocks)
+        assert [n.text for n in nodes] == [
+            "BÖLÜM 4 ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI",
+            "Sümeyye ÇARKIT1,2",
+        ]
+
+    def test_a_title_line_in_another_size_does_not_join(self):
+        """A bold run-in lead at a different size belongs to the body, not the title."""
+        nodes = [
+            self._node("n1", "BÖLÜM 4", BlockRole.HEADING, bold=True),
+            self._node("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", bold=True),
+            self._node("n3", "Giriş.", bold=True),
+        ]
+        blocks = self._blocks(
+            ("n1", "BÖLÜM 4", 14.0, True),
+            ("n2", "ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI", 12.0, True),
+            ("n3", "Giriş.", 9.0, True),
+        )
+        merge_division_numbers(nodes, blocks)
+        assert nodes[0].text == "BÖLÜM 4 ELEKTRİKLİ ARAÇLARDA KULLANILAN AKI"
+        assert nodes[-1].text == "Giriş."
+
+
+class TestNonHeadings:
+    """Lines that carry no chapter, however they are set."""
+
+    def test_an_isbn_line_is_never_a_heading(self):
+        block = _block("978-625-378-117-0 ISBN: 978-625-378-117-0",
+                       size=BODY * 1.4, bold=True, centred=True)
+        assert _score(block, sparse=True, first=True).score == 0.0
+
+    def test_a_citation_tail_is_never_a_heading(self):
+        """"vd., 2019)" is the end of a wrapped citation, not a chapter."""
+        block = _block("vd., 2019)", size=BODY * 1.2, bold=True, centred=True)
+        assert _score(block, sparse=True, first=True).score == 0.0
+
+
+class TestNumberedSectionsUnderLabelledChapters:
+    """A book that says "BÖLÜM 2" has told us what its chapters are.
+
+    In such a book "1. GİRİŞ" is the first section *of* a chapter, not a
+    chapter. Left at chapter level it split a real volume's navigation at the
+    introduction of two different chapters, so the same book listed both
+    "BÖLÜM 5 ..." and a bare "1. GİRİŞ" as top-level entries. Where a book
+    never labels a division, "1. Kurban" really is the chapter and must stay.
+    """
+
+    @staticmethod
+    def _h(text, level=2):
+        return StructuralNode(
+            node_id=text[:6], role=BlockRole.HEADING, text=text,
+            level=level, heading_scale=1.27, source_block_ids=[text[:6]],
+        )
+
+    def test_a_numbered_section_sits_below_a_labelled_chapter(self):
+        nodes = [
+            self._h("BÖLÜM 1 BİLİM VE TEKNOLOJİDE DÖNÜŞÜMÜN GÜCÜ"),
+            self._h("1. GİRİŞ"),
+            self._h("BÖLÜM 2 ÇEVİK PROJE YÖNETİMİ"),
+            self._h("2. TEMEL ARAŞTIRMA VE BULGULAR"),
+        ]
+        assign_heading_levels(nodes)
+        by_text = {n.text: n.level for n in nodes}
+        chapter = by_text["BÖLÜM 1 BİLİM VE TEKNOLOJİDE DÖNÜŞÜMÜN GÜCÜ"]
+        assert by_text["1. GİRİŞ"] > chapter
+        assert by_text["2. TEMEL ARAŞTIRMA VE BULGULAR"] > chapter
+
+    def test_an_unlabelled_book_keeps_its_numbered_chapters(self):
+        nodes = [self._h("1. Kurban", level=1), self._h("2. Sisin İçinden", level=1)]
+        assign_heading_levels(nodes)
+        assert [n.level for n in nodes] == [1, 1]
+
+
+class TestWrappedTitles:
+    """One title that wrapped is one heading.
+
+    A 31pt cover title set over two lines arrived as two level-1 headings, so a
+    real book opened with two navigation entries that were halves of its own
+    name — and the split level had to reckon with two "chapters" that were one
+    title. Lines of one title share a page, a size and a weight, and a
+    continuation never carries a number of its own.
+    """
+
+    @staticmethod
+    def _nodes(*texts, page=1):
+        return [
+            StructuralNode(node_id=f"n{i}", role=BlockRole.HEADING, text=t,
+                           page=page, bold=True, source_block_ids=[f"b{i}"])
+            for i, t in enumerate(texts)
+        ]
+
+    @staticmethod
+    def _blocks(*specs, page=1):
+        return {
+            f"b{i}": Block(block_id=f"b{i}", page=page, page_width=PAGE_W,
+                           page_height=PAGE_H, bbox=(0, 0, 100, 10), kind="text",
+                           text=t, font_size=size, bold=True)
+            for i, (t, size) in enumerate(specs)
+        }
+
+    def test_two_lines_of_one_cover_title_become_one_heading(self):
+        nodes = self._nodes("YAPAY ZEKÂ VE MAKİNE ÖĞRENİMİ İLE",
+                            "MÜHENDİSLİKTE YENİLİKÇİ YAKLAŞIMLAR")
+        blocks = self._blocks(("YAPAY ZEKÂ VE MAKİNE ÖĞRENİMİ İLE", 31.0),
+                              ("MÜHENDİSLİKTE YENİLİKÇİ YAKLAŞIMLAR", 31.0))
+        assert merge_wrapped_titles(nodes, blocks) == 1
+        assert len(nodes) == 1
+        assert nodes[0].text == (
+            "YAPAY ZEKÂ VE MAKİNE ÖĞRENİMİ İLE MÜHENDİSLİKTE YENİLİKÇİ YAKLAŞIMLAR"
+        )
+
+    def test_sibling_numbered_headings_stay_apart(self):
+        """"1.2." after "1.1." starts a section; it never continues one."""
+        nodes = self._nodes("1.1. Fırsatlar ve Zorluklar", "1.2. Açıklanabilir Yapay Zekâ")
+        blocks = self._blocks(("1.1. Fırsatlar ve Zorluklar", 12.0),
+                              ("1.2. Açıklanabilir Yapay Zekâ", 12.0))
+        assert merge_wrapped_titles(nodes, blocks) == 0
+        assert len(nodes) == 2
+
+    def test_headings_at_different_sizes_stay_apart(self):
+        nodes = self._nodes("ELEKTRİKLİ ARAÇLAR", "1. GİRİŞ")
+        blocks = self._blocks(("ELEKTRİKLİ ARAÇLAR", 14.0), ("1. GİRİŞ", 12.0))
+        assert merge_wrapped_titles(nodes, blocks) == 0
+
+    def test_a_chapter_already_carrying_its_label_is_left_alone(self):
+        nodes = self._nodes("BÖLÜM 3 VERİ YAPILARI", "KAYNAKÇA")
+        blocks = self._blocks(("BÖLÜM 3 VERİ YAPILARI", 12.0), ("KAYNAKÇA", 12.0))
+        assert merge_wrapped_titles(nodes, blocks) == 0

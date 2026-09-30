@@ -97,6 +97,36 @@ def test_confidence_scoring_rejects_shapes_that_are_not_really_tables():
     assert _score_table(dense) >= settings.table_min_confidence
 
 
+def test_centred_display_text_is_not_a_grid():
+    """A chapter title centred over three lines is not a two-column table.
+
+    Measured on a real volume: "BÖLÜM 2" over "ÇEVİK PROJE YÖNETİMİ
+    METODOLOJİSİ VE ENDÜSTRİDE" over "KULLANILABİLİRLİĞİ" was read as a 3x2
+    grid whose second column was empty throughout. It scored 0.86, replaced the
+    chapter opening with a table, and cost the book two chapters in its
+    navigation. What gives a grid away is that its rows span columns; centred
+    text only ever occupies one cell per row.
+    """
+    title_block = [
+        ["BÖLÜM 2", ""],
+        ["ÇEVİK PROJE YÖNETİMİ METODOLOJİSİ VE ENDÜSTRİDE", ""],
+        ["KULLANILABİLİRLİĞİ", ""],
+    ]
+    assert _score_table(title_block) == 0.0
+
+    # The same shape staggered across the columns is still centred text.
+    staggered = [
+        ["FARKLI GEMİ TİPLERİ ÖRNEĞİNDE DENİZ", ""],
+        ["TAŞIMACILIĞINDA KARBON SALINIMININ", ""],
+        ["", "SINIRLANDIRILMASI"],
+    ]
+    assert _score_table(staggered) == 0.0
+
+    # A real grid with one gap in it still reads as a grid.
+    gappy = [["h1", "h2", "h3"], ["1", "", "3"], ["4", "5", "6"]]
+    assert _score_table(gappy) >= settings.table_min_confidence
+
+
 def _detected(page: int, cols: int, caption: str | None = None):
     from app.pipeline.tables import DetectedTable
 

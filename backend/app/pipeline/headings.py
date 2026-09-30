@@ -113,6 +113,11 @@ _URL_RE = re.compile(r"^(https?://|www\.)|\.(com|org|net|io|co)\b", re.IGNORECAS
 # An epigraph or pull quote opens with a quotation mark; it is content, not a
 # heading, however isolated it is on the page.
 _OPENS_AS_QUOTE_RE = re.compile(r'^\s*[«"“”\'‘’]')
+# A copyright page sets its ISBN centred and bold, exactly like a title; the
+# tail of a citation that wrapped off the foot of the previous page ("vd.,
+# 2019)") is centred by the same justification. Both scored as chapters on a
+# real 168-page volume, putting an ISBN and half a reference in the navigation.
+_ISBN_RE = re.compile(r"\bISBN\b", re.IGNORECASE)
 
 # Score at or above which a block is accepted as a heading, and the score that
 # additionally marks it as a top-level division. Both are deliberately high:
@@ -168,6 +173,10 @@ def score_heading(
     if not text or len(text) > _MAX_HEADING_CHARS:
         return HeadingEvidence(0.0, signals, False)
     if _URL_RE.search(text) or _OPENS_AS_QUOTE_RE.match(text):
+        return HeadingEvidence(0.0, signals, False)
+    # An ISBN names no chapter, and a line closing a parenthesis it never
+    # opened is the tail of something that began on the page before.
+    if _ISBN_RE.search(text) or text.count(")") > text.count("("):
         return HeadingEvidence(0.0, signals, False)
 
     # A heading occupies one line, occasionally two when a long title wraps.
@@ -254,13 +263,83 @@ def score_heading(
     return HeadingEvidence(max(0.0, score), signals, is_division)
 
 
-def merge_division_numbers(nodes: list[StructuralNode]) -> int:
-    """Fold a lone division number into the title beneath it.
+# A display title runs to a handful of lines at most; beyond that the run has
+# stopped being a title and started swallowing the page.
+_MAX_TITLE_BLOCK_LINES = 4
+# Two lines of one title are set at one size. Half a point of slack absorbs
+# rounding in the font metrics without letting a different size through.
+_TITLE_SIZE_TOLERANCE = 0.51
+
+
+def _font_size_of(node: StructuralNode, blocks_by_id: dict | None) -> float | None:
+    if not blocks_by_id:
+        return None
+    sizes = [
+        blocks_by_id[bid].font_size
+        for bid in node.source_block_ids
+        if bid in blocks_by_id and blocks_by_id[bid].font_size
+    ]
+    return max(sizes) if sizes else None
+
+
+def _title_lines_after(
+    nodes: list[StructuralNode], index: int, blocks_by_id: dict | None
+) -> list[StructuralNode]:
+    """The display lines that finish the title opened by the label at *index*.
+
+    A chapter opening is set as a block: the division label, then the title
+    over one to three lines, then the byline. Every line of the title shares
+    one size and one weight, and the byline drops the weight even where it
+    keeps the size — which is what ends the run.
+    """
+    label = nodes[index]
+    run: list[StructuralNode] = []
+    size: float | None = None
+
+    for nxt in nodes[index + 1 :]:
+        if nxt.page != label.page or len(run) >= _MAX_TITLE_BLOCK_LINES:
+            break
+        if nxt.role not in (BlockRole.HEADING, BlockRole.PARAGRAPH):
+            break
+        text = _text_of_node(nxt)
+        if not text or is_division_label(text) or len(text.split()) > _MAX_HEADING_WORDS:
+            break
+
+        if not run:
+            # The first line carries the title on its own when it scored as a
+            # heading -- the classic "1" set over "Kurban". A line that scored
+            # only as a paragraph has to look display-set to qualify.
+            if nxt.role is not BlockRole.HEADING and not nxt.bold:
+                break
+            size = _font_size_of(nxt, blocks_by_id)
+        else:
+            # Continuations must match the first line, or the byline beneath a
+            # one-line title joins it.
+            if not nxt.bold:
+                break
+            nxt_size = _font_size_of(nxt, blocks_by_id)
+            if (
+                size is not None
+                and nxt_size is not None
+                and abs(nxt_size - size) > _TITLE_SIZE_TOLERANCE
+            ):
+                break
+        run.append(nxt)
+
+    return run
+
+
+def merge_division_numbers(
+    nodes: list[StructuralNode], blocks_by_id: dict | None = None
+) -> int:
+    """Fold a division label into the whole title beneath it.
 
     Books commonly set the number on its own line above the chapter title
     ("1" over "Kurban"). Left apart, the navigation entry reads "Kurban" and
     loses its position in the book, while the stray number becomes a heading of
-    its own. Returns the number of merges performed.
+    its own. Where the title itself runs to several display lines, folding in
+    only the first truncated every entry in the navigation, so the whole run is
+    taken. Returns the number of merges performed.
     """
     merged_count = 0
     result: list[StructuralNode] = []
@@ -268,39 +347,117 @@ def merge_division_numbers(nodes: list[StructuralNode]) -> int:
 
     while index < len(nodes):
         node = nodes[index]
-        nxt = nodes[index + 1] if index + 1 < len(nodes) else None
 
         # The number is frequently set no larger than the body text, so it
-        # scores as an ordinary paragraph rather than a heading. Requiring both
-        # sides to be headings left it stranded as a stray "<p>1</p>" at the
-        # foot of the previous chapter, and the navigation entry read "Kurban"
-        # three times over with nothing to tell the chapters apart. A lone
-        # numeral immediately above a heading on the same page is that
-        # heading's number whichever role it was given.
-        if (
-            node.role in (BlockRole.HEADING, BlockRole.PARAGRAPH)
-            and nxt is not None
-            and nxt.role == BlockRole.HEADING
-            and node.page == nxt.page
+        # scores as an ordinary paragraph rather than a heading. Requiring it
+        # to be a heading left it stranded as a stray "<p>1</p>" at the foot of
+        # the previous chapter, and the navigation entry read "Kurban" three
+        # times over with nothing to tell the chapters apart. A lone numeral
+        # above a title on the same page is that title's number whichever role
+        # it was given.
+        run = (
+            _title_lines_after(nodes, index, blocks_by_id)
+            if node.role in (BlockRole.HEADING, BlockRole.PARAGRAPH)
             and is_division_label(_text_of_node(node))
-            and not is_division_label(_text_of_node(nxt))
-        ):
-            # Joined with a space, never with invented punctuation: the source
+            else []
+        )
+        if run:
+            # Joined with spaces, never with invented punctuation: the source
             # set "1" above "Kurban" with no full stop, and adding one would put
             # a character in the book that the author did not write.
-            number = _text_of_node(node)
-            title = _text_of_node(nxt)
-            nxt.text = f"{number} {title}"
-            nxt.source_block_ids = list(node.source_block_ids) + list(nxt.source_block_ids)
-            nxt.level = min(node.level or 1, nxt.level or 1)
-            nxt.confidence = max(node.confidence, nxt.confidence)
-            result.append(nxt)
+            head = run[0]
+            head.text = " ".join(
+                [_text_of_node(node)] + [_text_of_node(n) for n in run]
+            )
+            head.role = BlockRole.HEADING
+            head.source_block_ids = list(node.source_block_ids) + [
+                bid for n in run for bid in n.source_block_ids
+            ]
+            levels = [n.level for n in [node, *run] if n.level is not None]
+            head.level = min(levels) if levels else 1
+            head.confidence = max(n.confidence for n in [node, *run])
+            head.bold = node.bold or any(n.bold for n in run)
+            # Levels are read off heading_scale afterwards, so the merged
+            # heading has to keep the largest scale of its parts. Title lines
+            # that scored only as paragraphs carry no scale at all; inheriting
+            # that None sent "BÖLÜM 1" to h1 while its untouched neighbours
+            # stayed at h2, and the navigation dropped the chapters that no
+            # longer sat at the split level.
+            scales = [n.heading_scale for n in [node, *run] if n.heading_scale]
+            head.heading_scale = max(scales) if scales else None
+            result.append(head)
             merged_count += 1
-            index += 2
+            index += 1 + len(run)
             continue
 
         result.append(node)
         index += 1
+
+    nodes[:] = result
+    return merged_count
+
+
+def merge_wrapped_titles(
+    nodes: list[StructuralNode], blocks_by_id: dict | None = None
+) -> int:
+    """Join the lines of a single title that wrapped across a line break.
+
+    A cover title set over two lines arrives as two headings, which read as two
+    entries in the navigation and count as two divisions when the split level
+    is chosen. Lines of one title share a page, a size and a weight; what tells
+    a genuine sibling apart is that it opens with a number or a division label
+    of its own, which no continuation line does. Returns the number of merges.
+    """
+    merged_count = 0
+    result: list[StructuralNode] = []
+    index = 0
+
+    while index < len(nodes):
+        node = nodes[index]
+        text = _text_of_node(node)
+        size = _font_size_of(node, blocks_by_id)
+        run: list[StructuralNode] = []
+
+        # A division heading has already been assembled with its own title
+        # block, and its size deliberately differs from the lines below it.
+        if (
+            node.role is BlockRole.HEADING
+            and size is not None
+            and not is_division_heading(text)
+            and not is_division_label(text)
+        ):
+            for nxt in nodes[index + 1 :]:
+                if len(run) >= _MAX_TITLE_BLOCK_LINES:
+                    break
+                if nxt.role is not BlockRole.HEADING or nxt.page != node.page:
+                    break
+                if nxt.bold != node.bold:
+                    break
+                nxt_text = _text_of_node(nxt)
+                # Anything that numbers or labels itself begins a heading.
+                if (
+                    not nxt_text
+                    or section_number_depth(nxt_text)
+                    or is_division_label(nxt_text)
+                    or is_division_heading(nxt_text)
+                ):
+                    break
+                nxt_size = _font_size_of(nxt, blocks_by_id)
+                if nxt_size is None or abs(nxt_size - size) > _TITLE_SIZE_TOLERANCE:
+                    break
+                run.append(nxt)
+
+        if run:
+            node.text = " ".join([text] + [_text_of_node(n) for n in run])
+            node.source_block_ids = list(node.source_block_ids) + [
+                bid for n in run for bid in n.source_block_ids
+            ]
+            node.confidence = max(n.confidence for n in [node, *run])
+            merged_count += 1
+            index += 1 + len(run)
+        else:
+            index += 1
+        result.append(node)
 
     nodes[:] = result
     return merged_count
@@ -366,9 +523,19 @@ def _apply_numbering_hierarchy(headings: list[StructuralNode]) -> None:
 
     for node in headings:
         depth = section_number_depth(node.text)
-        if depth < 2:
-            continue  # "1. GİRİŞ" is a chapter opener, not a subsection
-        proposed = min(6, chapter_level + depth - 1)
+        if depth < 1:
+            continue
+        # A bare "1. GİRİŞ" is a chapter opener in a book that numbers its
+        # chapters, and the first section of one in a book that names them.
+        # This book has already said "BÖLÜM 2", so the plain number is a
+        # section: left at chapter level it put the introduction of two
+        # different chapters into the navigation as chapters of their own.
+        if depth < 2 and not is_division_heading(node.text):
+            proposed = min(6, chapter_level + 1)
+        elif depth < 2:
+            continue
+        else:
+            proposed = min(6, chapter_level + depth - 1)
         if node.level is None or proposed > node.level:
             node.level = proposed
 

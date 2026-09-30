@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.models.document import BlockRole, StructuralNode
-from app.pipeline.hyphenation import join_lines_with_hyphenation_repair
+from app.pipeline.hyphenation import HyphenEvidence, join_lines_with_hyphenation_repair
 from app.pipeline.structure import TERMINAL_PUNCT
 
 
@@ -30,7 +30,9 @@ def _continues(prev_last_line: str, next_first_line: str) -> tuple[bool, float]:
 _MERGEABLE_ROLES = (BlockRole.PARAGRAPH, BlockRole.QUOTE)
 
 
-def reconstruct_paragraphs(nodes: list[StructuralNode]) -> list[StructuralNode]:
+def reconstruct_paragraphs(
+    nodes: list[StructuralNode], evidence: HyphenEvidence | None = None
+) -> list[StructuralNode]:
     """Merge consecutive prose nodes (which may span PDF blocks, columns, and
     pages) into full logical paragraphs, repairing hyphenation across the joins.
 
@@ -47,7 +49,7 @@ def reconstruct_paragraphs(nodes: list[StructuralNode]) -> list[StructuralNode]:
     def flush() -> None:
         nonlocal run_lines, run_source_ids, run_confidence, run_page
         if run_lines:
-            text = join_lines_with_hyphenation_repair(run_lines)
+            text = join_lines_with_hyphenation_repair(run_lines, evidence)
             result.append(
                 StructuralNode(
                     node_id=f"para_{run_source_ids[0]}",

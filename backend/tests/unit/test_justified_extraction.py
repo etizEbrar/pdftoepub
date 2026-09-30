@@ -157,8 +157,16 @@ class TestNumberingHierarchy:
         )
         assert by_text["BÖLÜM 1"] == by_text["BÖLÜM 2"], "chapters at differing levels"
 
-    def test_a_chapter_opener_numbered_1_is_not_demoted(self):
-        """"1. GİRİŞ" opens a division; only dotted numbers are subsections."""
+    def test_a_plain_number_is_a_section_where_chapters_are_named(self):
+        """"1. GİRİŞ" is a section of a BÖLÜM, not a BÖLÜM.
+
+        This assertion used to read the other way, on the rule that only a
+        dotted number marks a subsection. The book it was written about says
+        otherwise: its "1. GİRİŞ" headings open on pages 96 and 112, two pages
+        into chapters that began at 94 and 110 with their own "BÖLÜM n" and
+        title. Kept at chapter level they became top-level navigation entries
+        beside the chapters containing them.
+        """
         from app.pipeline.headings import assign_heading_levels
 
         nodes = self._headings(
@@ -166,7 +174,16 @@ class TestNumberingHierarchy:
         )
         assign_heading_levels(nodes)
         by_text = {n.text: n.level for n in nodes}
-        assert by_text["1. GİRİŞ"] == by_text["BÖLÜM 1"]
+        assert by_text["1. GİRİŞ"] > by_text["BÖLÜM 1"]
+        assert by_text["BÖLÜM 1"] == by_text["BÖLÜM 2"]
+
+    def test_a_numbered_chapter_survives_where_none_are_named(self):
+        """With no "BÖLÜM" anywhere, "1. Kurban" is the chapter itself."""
+        from app.pipeline.headings import assign_heading_levels
+
+        nodes = self._headings(("1. Kurban", 1.6), ("2. Sisin İçinden", 1.6))
+        assign_heading_levels(nodes)
+        assert [n.level for n in nodes] == [1, 1]
 
     def test_deeper_numbering_goes_deeper_still(self):
         from app.pipeline.headings import assign_heading_levels

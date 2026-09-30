@@ -7,6 +7,7 @@ import fitz
 
 from app.core.logging import get_logger
 from app.models.document import Block, TableCell, TableData
+from app.pipeline.hyphenation import HyphenEvidence, join_lines_with_hyphenation_repair
 
 logger = get_logger(__name__)
 
@@ -22,10 +23,18 @@ class DetectedTable:
     covered_block_ids: list[str]
 
 
-def _cell_text(cell_value: str | None) -> str:
+def _cell_text(cell_value: str | None, evidence: HyphenEvidence | None = None) -> str:
+    """Flatten a cell's wrapped lines, repairing the hyphenation at each join.
+
+    A naive whitespace join turned "co-\ninvocation" into "co- invocation": a
+    hyphen followed by a space, which is wrong however the break is read. Cells
+    wrap exactly like prose, so they need the same repair prose gets.
+    """
     if not cell_value:
         return ""
-    return " ".join(str(cell_value).split())
+    return " ".join(
+        join_lines_with_hyphenation_repair(str(cell_value).split("\n"), evidence).split()
+    )
 
 
 def _looks_like_header(row: list[str], body_rows: list[list[str]]) -> bool:
@@ -58,6 +67,16 @@ def _score_table(rows: list[list[str]]) -> float:
         return 0.0
     col_count = len(rows[0])
     if col_count < 2:
+        return 0.0
+
+    # What makes a grid a grid is that its rows reach across the columns.
+    # Display text centred over several lines lands one line per row and leaves
+    # the other column empty, which otherwise scores as a clean, consistent
+    # table: a real book's chapter openings were being replaced by 3x2 tables
+    # and dropping out of the navigation. Ordinary tables keep most rows
+    # spanning, so a single gap in a row costs nothing.
+    spanning = sum(1 for r in rows if sum(1 for c in r if c.strip()) >= 2)
+    if spanning * 2 < len(rows):
         return 0.0
 
     consistent = sum(1 for r in rows if len(r) == col_count) / len(rows)
@@ -104,7 +123,11 @@ def _blocks_inside(page_blocks: list[Block], bbox: tuple[float, float, float, fl
     return covered
 
 
-def detect_tables_on_page(page: fitz.Page, page_blocks: list[Block]) -> list[DetectedTable]:
+def detect_tables_on_page(
+    page: fitz.Page,
+    page_blocks: list[Block],
+    evidence: HyphenEvidence | None = None,
+) -> list[DetectedTable]:
     """Find tables using PyMuPDF's geometric ruling/whitespace analysis.
 
     Purely local and deterministic — no model, no API. Every detection carries a
@@ -125,12 +148,19 @@ def detect_tables_on_page(page: fitz.Page, page_blocks: list[Block]) -> list[Det
             logger.warning("could not extract table %d on page %d", index, page_num)
             continue
 
-        rows = [[_cell_text(c) for c in row] for row in extracted or []]
+        rows = [[_cell_text(c, evidence) for c in row] for row in extracted or []]
         rows = [r for r in rows if any(c.strip() for c in r)]
         if len(rows) < 2:
             continue
 
         confidence = _score_table(rows)
+        # A zero score means the shape is not a table at all, as opposed to a
+        # real table we are unsure we can render. Keeping it would still take
+        # the text it covers out of the prose and hand it to the image
+        # fallback, so a picture of a chapter heading would replace the
+        # heading itself.
+        if confidence <= 0.0:
+            continue
         col_count = max(len(r) for r in rows)
         has_header = _looks_like_header(rows[0], rows[1:])
 

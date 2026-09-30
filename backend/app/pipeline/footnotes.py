@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from app.models.document import Block, BlockRole, StructuralNode
-from app.pipeline.hyphenation import join_lines_with_hyphenation_repair
+from app.pipeline.hyphenation import HyphenEvidence, join_lines_with_hyphenation_repair
 
 # Private-use-area sentinels used to carry candidate footnote markers through
 # hyphenation repair and paragraph merging as ordinary characters, so the EPUB
@@ -265,18 +265,24 @@ _MULTILINE_ROLES = {
 }
 
 
-def _flatten_remaining_multiline_text(nodes: list[StructuralNode]) -> None:
+def _flatten_remaining_multiline_text(
+    nodes: list[StructuralNode], evidence: HyphenEvidence | None = None
+) -> None:
     """PARAGRAPH nodes get hyphenation-aware line joining via
     paragraphs.reconstruct_paragraphs; every other multi-line role (a footnote
     body, a quote, a list item, a wrapped heading) still carries its raw
     block-internal "\\n"s and needs the same repair before rendering."""
     for node in nodes:
         if node.role in _MULTILINE_ROLES and "\n" in node.text:
-            node.text = join_lines_with_hyphenation_repair(node.text.split("\n"))
+            node.text = join_lines_with_hyphenation_repair(
+                node.text.split("\n"), evidence
+            )
 
 
 def link_references(
-    nodes: list[StructuralNode], leave_unmatched: bool = False
+    nodes: list[StructuralNode],
+    leave_unmatched: bool = False,
+    evidence: HyphenEvidence | None = None,
 ) -> tuple[list[StructuralNode], int]:
     """Match sentinel-wrapped reference markers in body text to FOOTNOTE-role
     nodes on the same (or immediately following) page, per spec sections 18-19.
@@ -342,11 +348,13 @@ def link_references(
         node.text = MARKER_SCAN_RE.sub(_replace, node.text)
 
     if not leave_unmatched:
-        _flatten_remaining_multiline_text(nodes)
+        _flatten_remaining_multiline_text(nodes, evidence)
     return nodes, linked
 
 
-def finalize_unmatched_markers(nodes: list[StructuralNode]) -> int:
+def finalize_unmatched_markers(
+    nodes: list[StructuralNode], evidence: HyphenEvidence | None = None
+) -> int:
     """Turn any reference markers still unclaimed after footnote *and* endnote
     linking into plain superscripts, then repair multi-line text.
 
@@ -366,5 +374,5 @@ def finalize_unmatched_markers(nodes: list[StructuralNode]) -> int:
         if node.verse_lines:
             node.verse_lines = [MARKER_SCAN_RE.sub(_replace, line) for line in node.verse_lines]
 
-    _flatten_remaining_multiline_text(nodes)
+    _flatten_remaining_multiline_text(nodes, evidence)
     return unmatched
