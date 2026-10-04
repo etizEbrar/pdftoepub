@@ -143,3 +143,66 @@ private actor Updates {
     private(set) var statuses: [JobStage] = []
     func append(_ status: JobStage) { statuses.append(status) }
 }
+
+// MARK: - Reaching the server at all
+
+/// The app shipped pointing at a live, healthy backend and still sat forever on
+/// "Waking the conversion server" with no way out but a force-quit. These cover
+/// the two reasons why.
+final class BackendReachabilityTests: XCTestCase {
+
+    /// `URLSession.shared` carries a seven-day resource timeout, so a stalled
+    /// transfer never failed and the spinner never ended.
+    func testEveryBackendRequestIsBounded() {
+        let session = BackendTimeouts.makeSession()
+        let config = session.configuration
+
+        XCTAssertLessThanOrEqual(
+            config.timeoutIntervalForResource, 900,
+            "a request that can outlive the user's patience is a hang, not a timeout"
+        )
+        XCTAssertGreaterThan(config.timeoutIntervalForResource, 0)
+        XCTAssertLessThanOrEqual(config.timeoutIntervalForRequest, 120)
+        XCTAssertFalse(
+            config.waitsForConnectivity,
+            "parking the task until the network returns is the same spinner again"
+        )
+    }
+
+    /// Seven days, for contrast: this is what the app was using.
+    func testTheSharedSessionWouldNotHaveBeenAcceptable() {
+        XCTAssertGreaterThan(URLSession.shared.configuration.timeoutIntervalForResource, 900)
+    }
+
+    func testAnOversizedBookIsNamedWithBothNumbers() {
+        let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
+        let reason = caps.rejection(forByteCount: 60 * 1024 * 1024)
+        let message = try? XCTUnwrap(reason)
+        XCTAssertNotNil(message)
+        XCTAssertTrue(message?.contains("25 MB") ?? false, "the limit is missing: \(message ?? "nil")")
+    }
+
+    func testAFileWithinTheLimitIsNotRefused() {
+        let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
+        XCTAssertNil(caps.rejection(forByteCount: 6 * 1024 * 1024))
+    }
+
+    /// An older backend does not publish its limits. The app must still convert
+    /// rather than refuse everything.
+    func testAServerThatStatesNoLimitRefusesNothing() throws {
+        let json = Data(#"{"status":"ok","ai_provider":"none"}"#.utf8)
+        let caps = try JSONDecoder().decode(BackendCapabilities.self, from: json)
+        XCTAssertEqual(caps.maxUploadMB, 0)
+        XCTAssertNil(caps.rejection(forByteCount: 500 * 1024 * 1024))
+    }
+
+    func testTheRealHealthPayloadDecodes() throws {
+        let json = Data(#"""
+            {"status":"ok","ai_provider":"none","max_upload_mb":25,"max_page_count":600}
+            """#.utf8)
+        let caps = try JSONDecoder().decode(BackendCapabilities.self, from: json)
+        XCTAssertEqual(caps.maxUploadMB, 25)
+        XCTAssertEqual(caps.maxPageCount, 600)
+        XCTAssertEqual(caps.aiProvider, "none")
+    }
+}

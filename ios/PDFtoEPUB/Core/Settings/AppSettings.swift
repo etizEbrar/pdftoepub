@@ -42,6 +42,19 @@ final class AppSettings {
         baseURL == nil
     }
 
+    /// True when the user has pointed the app somewhere other than the address
+    /// the build ships with. Drives the "use the app's own server" escape hatch.
+    var isOverridingBuiltInAddress: Bool {
+        guard let builtIn = BackendEnvironment.defaultBaseURLString else { return false }
+        return baseURLString.trimmingCharacters(in: .whitespacesAndNewlines) != builtIn
+    }
+
+    /// Puts the built-in address back, for when an experiment with a tunnel or
+    /// a LAN server leaves the app pointing at something that is gone.
+    func resetToBuiltInAddress() {
+        baseURLString = BackendEnvironment.defaultBaseURLString ?? ""
+    }
+
     private enum Keys {
         static let baseURL = "backend.baseURL"
         static let preferredMode = "conversion.preferredMode"

@@ -124,5 +124,15 @@ async def health() -> dict:
     Deliberately minimal: no paths, no versions, no configuration, nothing that
     describes the host. `ai_provider` is included because the iOS app shows it
     to prove no cloud AI is in use, and it is a fixed word, not a secret.
+
+    The two limits are here so a client can refuse an impossible job before
+    uploading it. They were previously enforced only once the server had read
+    past them, which on a phone meant minutes of mobile upload ending in a
+    rejection. Neither is a secret: both are discoverable by hitting them.
     """
-    return {"status": "ok", "ai_provider": settings.ai_provider}
+    return {
+        "status": "ok",
+        "ai_provider": settings.ai_provider,
+        "max_upload_mb": settings.max_upload_mb,
+        "max_page_count": settings.max_page_count,
+    }

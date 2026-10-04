@@ -9,6 +9,12 @@ actor ConversionService {
         self.client = client
     }
 
+    /// What the server accepts. Called before the upload so an impossible
+    /// job, or an unreachable server, is reported in seconds.
+    func capabilities() async throws -> BackendCapabilities {
+        try await client.fetchCapabilities()
+    }
+
     func start(document: SelectedDocument, mode: ConversionMode) async throws -> String {
         let created = try await client.createConversion(fileURL: document.url, mode: mode)
         return created.id

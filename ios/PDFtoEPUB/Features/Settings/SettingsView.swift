@@ -19,37 +19,46 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    if BackendEnvironment.isManagedByBuild {
-                        // A hosted backend ships with the build; there is
-                        // nothing here for the user to get wrong.
-                        LabeledContent("Server", value: "Managed by the app")
-                    } else {
-                        TextField("http://192.168.1.10:8000", text: $settings.baseURLString)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .accessibilityIdentifier("settings.backendAddress")
-                            .onChange(of: settings.baseURLString) { _, _ in
-                                connectionState = .untested
-                            }
-
-                        if let issue = settings.addressIssue, !settings.baseURLString.isEmpty {
-                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
+                    // The address was hidden whenever the build shipped one,
+                    // on the reasoning that there was nothing to get wrong.
+                    // When that server is asleep, slow or broken there is then
+                    // nothing the user can do either — no way to point the app
+                    // at a tunnel, a LAN machine, or a second deployment. The
+                    // field is always editable now; the built-in address is
+                    // just its default, and one tap restores it.
+                    TextField("https://example.com", text: $settings.baseURLString)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .accessibilityIdentifier("settings.backendAddress")
+                        .onChange(of: settings.baseURLString) { _, _ in
+                            connectionState = .untested
                         }
 
-                        Button {
-                            Task { await testConnection() }
-                        } label: {
-                            HStack {
-                                Text("Test connection")
-                                Spacer()
-                                connectionIndicator
-                            }
+                    if let issue = settings.addressIssue, !settings.baseURLString.isEmpty {
+                        Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+
+                    Button {
+                        Task { await testConnection() }
+                    } label: {
+                        HStack {
+                            Text("Test connection")
+                            Spacer()
+                            connectionIndicator
                         }
-                        .accessibilityIdentifier("settings.testConnection")
-                        .disabled(connectionState == .checking || settings.addressIssue != nil)
+                    }
+                    .accessibilityIdentifier("settings.testConnection")
+                    .disabled(connectionState == .checking || settings.addressIssue != nil)
+
+                    if settings.isOverridingBuiltInAddress {
+                        Button("Use the app's own server") {
+                            settings.resetToBuiltInAddress()
+                            connectionState = .untested
+                        }
+                        .accessibilityIdentifier("settings.resetAddress")
                     }
                 } header: {
                     Text("Backend address")
@@ -80,8 +89,9 @@ struct SettingsView: View {
     }
 
     private var addressGuidance: String {
-        if BackendEnvironment.isManagedByBuild {
-            return "Conversions run on the app's own server. There is nothing to configure."
+        let builtIn = BackendEnvironment.defaultBaseURLString
+        if let builtIn, !settings.isOverridingBuiltInAddress {
+            return "Conversions run on the app's own server (\(builtIn)). Change this only if you are running your own, or pointing the app at a tunnel."
         }
         #if targetEnvironment(simulator)
         return "Where your conversion server is running. In the Simulator, http://localhost:8000 works."
@@ -117,7 +127,11 @@ struct SettingsView: View {
         }
         connectionState = .checking
         var request = URLRequest(url: baseURL.appendingPathComponent("health"))
-        request.timeoutInterval = 8
+        // A free-tier host sleeps after a quiet period and takes most of a
+        // minute to come back. At the old 8 seconds this reported a healthy
+        // server as unreachable whenever it had simply gone to sleep, which is
+        // most of the time it is asked.
+        request.timeoutInterval = 60
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

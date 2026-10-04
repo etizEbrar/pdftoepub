@@ -30,6 +30,20 @@ final class StubAPIClient: APIClient, @unchecked Sendable {
         self.downloadResult = downloadResult
     }
 
+    /// Generous by default so existing tests are unaffected by the
+    /// pre-upload size check; a test that wants the limit sets it.
+    var capabilities: BackendCapabilities = BackendCapabilities(
+        maxUploadMB: 1024, maxPageCount: 10_000
+    )
+    var capabilitiesError: Error?
+    private(set) var capabilitiesCallCount = 0
+
+    func fetchCapabilities() async throws -> BackendCapabilities {
+        capabilitiesCallCount += 1
+        if let capabilitiesError { throw capabilitiesError }
+        return capabilities
+    }
+
     func createConversion(fileURL: URL, mode: ConversionMode) async throws -> ConversionCreatedResponse {
         createCallCount += 1
         return try createResult.get()

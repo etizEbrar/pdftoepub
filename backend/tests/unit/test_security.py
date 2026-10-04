@@ -146,7 +146,12 @@ class TestHealthEndpoint:
         r = client.get("/health")
         assert r.status_code == 200
         body = r.json()
-        assert set(body) == {"status", "ai_provider"}, f"unexpected keys: {set(body)}"
+        assert set(body) == {
+            "status",
+            "ai_provider",
+            "max_upload_mb",
+            "max_page_count",
+        }, f"unexpected keys: {set(body)}"
         assert body["status"] == "ok"
         # No paths, secrets, versions or environment details.
         text = r.text
@@ -155,6 +160,20 @@ class TestHealthEndpoint:
 
     def test_health_reports_that_no_paid_ai_is_in_use(self, client):
         assert client.get("/health").json()["ai_provider"] == "none"
+
+    def test_health_publishes_the_limits_a_client_must_respect(self, client):
+        """The app pre-checks against these instead of uploading blind.
+
+        A book over the limit was rejected only once the server had read past
+        it, so on a phone the upload ran for minutes over mobile data and then
+        failed. These two numbers are already discoverable by hitting them, and
+        knowing them up front turns that into an instant, accurate message.
+        """
+        body = client.get("/health").json()
+        assert isinstance(body["max_upload_mb"], int)
+        assert body["max_upload_mb"] > 0
+        assert isinstance(body["max_page_count"], int)
+        assert body["max_page_count"] > 0
 
 
 class TestRateLimiting:

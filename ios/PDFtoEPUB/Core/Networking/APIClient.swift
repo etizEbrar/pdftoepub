@@ -3,6 +3,7 @@ import Foundation
 /// Protocol-based so views/view models can be tested against a stub without a
 /// live backend (see PDFtoEPUBTests/StubAPIClient.swift).
 protocol APIClient: Sendable {
+    func fetchCapabilities() async throws -> BackendCapabilities
     func createConversion(fileURL: URL, mode: ConversionMode) async throws -> ConversionCreatedResponse
     func fetchProgress(id: String) async throws -> ConversionProgress
     func fetchSummary(id: String) async throws -> ConversionSummary
@@ -11,13 +12,45 @@ protocol APIClient: Sendable {
     func deleteConversion(id: String) async throws
 }
 
+/// Timeouts for talking to the backend.
+///
+/// `URLSession.shared` carries a `timeoutIntervalForResource` of seven days.
+/// A connection that stalls without dropping — a sleeping free-tier host, a
+/// server that closes the read side mid-upload, a flaky mobile link —
+/// therefore never failed, and the app sat on "Waking the conversion server"
+/// indefinitely with no way out but force-quitting. Every request the app
+/// makes is now bounded, so a stall becomes an error the user can act on.
+enum BackendTimeouts {
+    /// Longest silence tolerated *within* a transfer. Reset by every byte, so
+    /// this bounds a dead connection, not a slow one.
+    static let betweenBytes: TimeInterval = 90
+    /// Longest any single request may take end to end. The upload returns as
+    /// soon as the job is queued and progress polls are tiny, so the binding
+    /// case is downloading a finished book over a slow link.
+    static let wholeRequest: TimeInterval = 600
+
+    static func makeSession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = betweenBytes
+        config.timeoutIntervalForResource = wholeRequest
+        // Fail now rather than parking the task until the network returns:
+        // the user is watching a spinner and needs to be told.
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }
+}
+
 final class LiveAPIClient: APIClient {
     private let baseURL: URL
     private let session: URLSession
 
-    init(baseURL: URL, session: URLSession = .shared) {
+    init(baseURL: URL, session: URLSession = BackendTimeouts.makeSession()) {
         self.baseURL = baseURL
         self.session = session
+    }
+
+    func fetchCapabilities() async throws -> BackendCapabilities {
+        try await get(BackendCapabilities.self, path: "health")
     }
 
     private func endpoint(_ path: String) -> URL {

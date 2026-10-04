@@ -82,6 +82,58 @@ struct ConversionCreatedResponse: Codable {
     let status: JobStage
 }
 
+/// What the server will accept, read from `/health` before uploading.
+///
+/// The limits are enforced server-side while the body is being read, so a book
+/// over the limit was only rejected after the whole thing had been sent. On a
+/// phone that is minutes of mobile data spent to earn an error. Asking first
+/// turns it into an instant, accurate message — and doubles as the reachability
+/// check, so an unreachable server is reported before any upload starts.
+struct BackendCapabilities: Codable {
+    let status: String
+    let aiProvider: String
+    let maxUploadMB: Int
+    let maxPageCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case aiProvider = "ai_provider"
+        case maxUploadMB = "max_upload_mb"
+        case maxPageCount = "max_page_count"
+    }
+
+    /// Tolerates a server that predates the limits being published, so a
+    /// mismatched pair degrades to the old behaviour instead of refusing to
+    /// convert anything.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? "ok"
+        aiProvider = try c.decodeIfPresent(String.self, forKey: .aiProvider) ?? "none"
+        maxUploadMB = try c.decodeIfPresent(Int.self, forKey: .maxUploadMB) ?? 0
+        maxPageCount = try c.decodeIfPresent(Int.self, forKey: .maxPageCount) ?? 0
+    }
+
+    init(status: String = "ok", aiProvider: String = "none",
+         maxUploadMB: Int, maxPageCount: Int) {
+        self.status = status
+        self.aiProvider = aiProvider
+        self.maxUploadMB = maxUploadMB
+        self.maxPageCount = maxPageCount
+    }
+
+    /// Nil when the file is acceptable, otherwise why it is not. A limit of
+    /// zero means the server did not state one, so nothing is refused.
+    func rejection(forByteCount bytes: Int) -> String? {
+        guard maxUploadMB > 0 else { return nil }
+        let limit = maxUploadMB * 1024 * 1024
+        guard bytes > limit else { return nil }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        return "This PDF is \(size), and the conversion server accepts up to "
+            + "\(maxUploadMB) MB. Try a smaller file, or raise MAX_UPLOAD_MB "
+            + "on your own server."
+    }
+}
+
 struct ConversionSummary: Codable {
     let id: String
     let status: JobStage

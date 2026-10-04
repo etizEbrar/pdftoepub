@@ -126,6 +126,25 @@ final class ConversionViewModel {
         conversionTask = Task { [weak self] in
             guard let self else { return }
             do {
+                // Ask the server what it accepts before sending anything. This
+                // is also the reachability check: an unreachable or sleeping
+                // host now fails here in seconds with a message naming the
+                // address, instead of leaving the upload to stall behind a
+                // spinner that said "Waking the conversion server" forever.
+                let capabilities = try await service.capabilities()
+                if let reason = capabilities.rejection(forByteCount: document.byteCount) {
+                    await MainActor.run {
+                        self.phase = .failed(
+                            ConversionFailure(
+                                code: "file_too_large",
+                                message: reason,
+                                isRetryable: false
+                            )
+                        )
+                    }
+                    return
+                }
+
                 let jobID = try await service.start(document: document, mode: mode)
                 await MainActor.run { self.currentJobID = jobID }
 
