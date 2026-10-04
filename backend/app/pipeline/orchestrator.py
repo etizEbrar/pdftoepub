@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 from pathlib import Path
 
 from app.core.config import settings
-from app.core.errors import ConversionError, EPUBValidationError, UnsupportedDocumentComplexityError
+from app.core.errors import (
+    ConversionError,
+    EPUBValidationError,
+    OCRTooSlowError,
+    UnsupportedDocumentComplexityError,
+)
 from app.core.logging import get_logger
 from app.jobs import store
 from app.models.document import Block, DocumentModel, PageTextKind, StructuralNode
@@ -90,6 +96,35 @@ async def run_pipeline(job_id: str) -> None:
                 "Your original PDF was not modified."
             )
             _update(current)
+
+
+# How many scanned pages to time before projecting the rest. One page carries
+# warm-up noise; two is steady enough to act on, and on the slowest hardware
+# measured that is about four minutes rather than the full twenty-five.
+_OCR_PROBE_PAGES = 2
+
+
+def _ocr_projection_exceeds_budget(
+    ocr_elapsed: float,
+    ocr_done: int,
+    ocr_total: int,
+    elapsed_total: float,
+    budget: float,
+) -> tuple[bool, float]:
+    """Whether finishing the remaining OCR would overrun the time limit.
+
+    Self-calibrating rather than a fixed rate, because the same page takes
+    ~1.8s on a laptop and ~110s on a shared-CPU container: any constant would
+    be wrong by a factor of sixty on one of them. Returns (exceeded,
+    projected_seconds_for_all_ocr).
+    """
+    if ocr_done <= 0 or ocr_elapsed <= 0:
+        return False, 0.0
+    per_page = ocr_elapsed / ocr_done
+    projected = per_page * ocr_total
+    remaining_pages = max(0, ocr_total - ocr_done)
+    remaining_budget = budget - elapsed_total
+    return per_page * remaining_pages > remaining_budget, projected
 
 
 def _run_pipeline_sync(job: Job) -> None:
@@ -245,6 +280,9 @@ def _execute_pipeline(job: Job) -> None:
             )
 
         _update(job, stage=JobStage.EXTRACTING, detail="Extracting text and images", page=0)
+        pipeline_started = time.monotonic()
+        ocr_elapsed = 0.0
+        ocr_done = 0
         blocks_by_page: dict[int, list[Block]] = {}
         page_fallback_nodes: list[StructuralNode] = []
         pages: dict[int, object] = {}
@@ -252,11 +290,36 @@ def _execute_pipeline(job: Job) -> None:
             page = doc[i]
             pages[i + 1] = page
             kind = analysis.page_kinds.get(i + 1, PageTextKind.NATIVE)
-            if kind in (PageTextKind.SCANNED, PageTextKind.MIXED):
+            is_ocr_page = kind in (PageTextKind.SCANNED, PageTextKind.MIXED)
+            if is_ocr_page:
                 _update(job, detail=f"Reading scanned page {i + 1} with OCR")
+            page_started = time.monotonic()
             page_blocks, fallback_node = _extract_page_blocks(
                 page, i, kind, document, images_dir, ocr_languages
             )
+            if is_ocr_page:
+                ocr_elapsed += time.monotonic() - page_started
+                ocr_done += 1
+                # Decide once, as soon as there is something to decide from.
+                if ocr_done == _OCR_PROBE_PAGES:
+                    exceeded, projected = _ocr_projection_exceeds_budget(
+                        ocr_elapsed,
+                        ocr_done,
+                        len(needs_ocr),
+                        time.monotonic() - pipeline_started,
+                        float(settings.conversion_timeout_seconds),
+                    )
+                    if exceeded:
+                        logger.error(
+                            "job %s: OCR of %d pages projects to %.0fs at %.1fs/page, "
+                            "over the %ds limit; stopping now",
+                            job.job_id,
+                            len(needs_ocr),
+                            projected,
+                            ocr_elapsed / ocr_done,
+                            settings.conversion_timeout_seconds,
+                        )
+                        raise OCRTooSlowError()
             blocks_by_page[i + 1] = page_blocks
             if fallback_node is not None:
                 page_fallback_nodes.append(fallback_node)

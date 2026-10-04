@@ -46,6 +46,26 @@ class UnsupportedDocumentComplexityError(ConversionError):
     )
 
 
+class OCRTooSlowError(ConversionError):
+    """This machine cannot finish this scanned book inside the time limit.
+
+    Measured: a scanned page takes ~1.8s on a developer laptop and ~110s on a
+    512 MB shared-CPU free tier -- sixty times slower. A 253-page scanned book
+    is eight minutes on the first and about eight hours on the second. Without
+    this check the job occupied the only worker until the conversion timeout
+    and then failed with nothing to show, having told the user nothing for 25
+    minutes. Projecting from the first pages turns that into an honest answer
+    in a couple of minutes.
+    """
+
+    code = "ocr_too_slow"
+    user_message = (
+        "This scanned book needs more OCR than this server can finish in time. "
+        "Convert it on a faster machine, or raise the server's conversion time "
+        "limit. Your original PDF was not modified."
+    )
+
+
 class EPUBValidationError(ConversionError):
     code = "epub_validation_failed"
     user_message = "The generated EPUB failed validation and was not returned."

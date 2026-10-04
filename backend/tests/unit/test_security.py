@@ -343,3 +343,49 @@ class TestRetention:
         )
         sweep_expired_jobs(ttl_hours=24)
         assert store.get_job(job_id) is not None, "an in-flight job must not be swept"
+
+
+class TestOCRBudget:
+    """Projecting the OCR cost before paying all of it.
+
+    Numbers are the measured ones: ~1.8s per scanned page on a laptop, ~110s
+    on a 512 MB shared-CPU free tier.
+    """
+
+    def test_a_slow_server_gives_up_on_a_long_scan_early(self):
+        from app.pipeline.orchestrator import _ocr_projection_exceeds_budget
+
+        exceeded, projected = _ocr_projection_exceeds_budget(
+            ocr_elapsed=220.0, ocr_done=2, ocr_total=253,
+            elapsed_total=235.0, budget=1500.0,
+        )
+        assert exceeded
+        assert projected > 20_000, projected
+
+    def test_a_fast_server_proceeds_with_the_same_book(self):
+        from app.pipeline.orchestrator import _ocr_projection_exceeds_budget
+
+        exceeded, _ = _ocr_projection_exceeds_budget(
+            ocr_elapsed=3.4, ocr_done=2, ocr_total=253,
+            elapsed_total=6.0, budget=5400.0,
+        )
+        assert not exceeded
+
+    def test_a_short_scan_proceeds_even_on_a_slow_server(self):
+        """Four pages at 110s each still fits inside 25 minutes."""
+        from app.pipeline.orchestrator import _ocr_projection_exceeds_budget
+
+        exceeded, _ = _ocr_projection_exceeds_budget(
+            ocr_elapsed=220.0, ocr_done=2, ocr_total=4,
+            elapsed_total=235.0, budget=1500.0,
+        )
+        assert not exceeded
+
+    def test_nothing_is_projected_from_no_measurement(self):
+        from app.pipeline.orchestrator import _ocr_projection_exceeds_budget
+
+        exceeded, _ = _ocr_projection_exceeds_budget(
+            ocr_elapsed=0.0, ocr_done=0, ocr_total=253,
+            elapsed_total=1.0, budget=1500.0,
+        )
+        assert not exceeded
