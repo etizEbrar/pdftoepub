@@ -14,6 +14,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.jobs import store
+from app.models.client_ocr import ClientOCR, ClientOCRPage
 from app.models.document import Block, DocumentModel, PageTextKind, StructuralNode
 from app.models.job import Job, JobStage
 from app.pipeline import (
@@ -39,9 +40,10 @@ from app.pipeline.confidence import run_ai_review
 from app.pipeline.epub.builder import build_epub, slugify
 from app.pipeline.integrity import compute_integrity
 from app.pipeline.ocr.page_ocr import ocr_page
+from app.pipeline.ocr.supplied import blocks_from_client_page
 from app.pipeline.quality import compute_quality_report
 from app.pipeline.validate import validate_epub
-from app.storage.temp_storage import epub_path_for, images_dir_for
+from app.storage.temp_storage import client_ocr_path_for, epub_path_for, images_dir_for
 
 logger = get_logger(__name__)
 
@@ -127,6 +129,24 @@ def _ocr_projection_exceeds_budget(
     return per_page * remaining_pages > remaining_budget, projected
 
 
+def _load_client_ocr(job: Job) -> dict[int, ClientOCRPage]:
+    """What the client already recognised, keyed by page number.
+
+    A payload that will not parse is ignored rather than fatal: the server can
+    still read the pages itself, slowly, and losing a conversion over a bad
+    field would be the worse outcome. The route validates on the way in, so
+    this only fires if the file was damaged after that.
+    """
+    path = client_ocr_path_for(job.job_id)
+    if not path.exists():
+        return {}
+    try:
+        return ClientOCR.model_validate_json(path.read_bytes()).by_page()
+    except Exception:
+        logger.warning("job %s: client OCR payload unreadable; reading pages here", job.job_id)
+        return {}
+
+
 def _run_pipeline_sync(job: Job) -> None:
     """Synchronous entry point used both by the async job queue (via
     asyncio.to_thread) and directly by tests. Any conversion failure is
@@ -155,6 +175,7 @@ def _extract_page_blocks(
     document: DocumentModel,
     images_dir: Path,
     ocr_languages: str | None,
+    client_page: ClientOCRPage | None = None,
 ) -> tuple[list[Block], StructuralNode | None]:
     """Get one page's blocks using the cheapest reliable source for that page.
 
@@ -175,10 +196,21 @@ def _extract_page_blocks(
     if kind == PageTextKind.NATIVE or kind == PageTextKind.EMPTY:
         return native_blocks + image_blocks, None
 
-    if not settings.ocr_enabled:
+    if client_page is not None:
+        # The client read this page on its own hardware. Trusted for the words
+        # and their boxes only: every layout decision below this line is still
+        # made here, so a page from a phone and a page from Tesseract travel
+        # the same path.
+        #
+        # Checked before `ocr_enabled` on purpose. That setting governs whether
+        # *this* server spends CPU on Tesseract, not what text it is willing to
+        # accept: someone who runs no Tesseract at all should still be able to
+        # convert a scan a phone has already read.
+        outcome = blocks_from_client_page(client_page, page.rect.width, page.rect.height)
+    elif not settings.ocr_enabled:
         return native_blocks + image_blocks, None
-
-    outcome = ocr_page(page, page_index, languages=ocr_languages)
+    else:
+        outcome = ocr_page(page, page_index, languages=ocr_languages)
     document.analysis.ocr_pages.append(page_num)
 
     if not outcome.reliable:
@@ -279,6 +311,15 @@ def _execute_pipeline(job: Job) -> None:
                 "job %s: %d of %d pages need OCR", job.job_id, len(needs_ocr), analysis.page_count
             )
 
+        client_ocr = _load_client_ocr(job)
+        if client_ocr:
+            logger.info(
+                "job %s: using client OCR for %d of %d pages needing it",
+                job.job_id,
+                len([p for p in needs_ocr if p in client_ocr]),
+                len(needs_ocr),
+            )
+
         _update(job, stage=JobStage.EXTRACTING, detail="Extracting text and images", page=0)
         pipeline_started = time.monotonic()
         ocr_elapsed = 0.0
@@ -290,14 +331,26 @@ def _execute_pipeline(job: Job) -> None:
             page = doc[i]
             pages[i + 1] = page
             kind = analysis.page_kinds.get(i + 1, PageTextKind.NATIVE)
+            client_page = client_ocr.get(i + 1)
             is_ocr_page = kind in (PageTextKind.SCANNED, PageTextKind.MIXED)
             if is_ocr_page:
-                _update(job, detail=f"Reading scanned page {i + 1} with OCR")
+                _update(
+                    job,
+                    detail=(
+                        f"Placing recognised text from page {i + 1}"
+                        if client_page is not None
+                        else f"Reading scanned page {i + 1} with OCR"
+                    ),
+                )
             page_started = time.monotonic()
             page_blocks, fallback_node = _extract_page_blocks(
-                page, i, kind, document, images_dir, ocr_languages
+                page, i, kind, document, images_dir, ocr_languages, client_page
             )
-            if is_ocr_page:
+            # Only pages this server read itself are charged to the OCR budget:
+            # placing a client's words is milliseconds, and counting it would
+            # make a long book look affordable when the remaining Tesseract
+            # pages are not.
+            if is_ocr_page and client_page is None:
                 ocr_elapsed += time.monotonic() - page_started
                 ocr_done += 1
                 # Decide once, as soon as there is something to decide from.
@@ -305,7 +358,7 @@ def _execute_pipeline(job: Job) -> None:
                     exceeded, projected = _ocr_projection_exceeds_budget(
                         ocr_elapsed,
                         ocr_done,
-                        len(needs_ocr),
+                        len([p for p in needs_ocr if p not in client_ocr]),
                         time.monotonic() - pipeline_started,
                         float(settings.conversion_timeout_seconds),
                     )

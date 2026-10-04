@@ -3,6 +3,9 @@ import SwiftUI
 struct ConversionProgressView: View {
     let document: SelectedDocument
     let progress: ConversionProgress?
+    /// Set while this device is reading a scanned book with Vision, before the
+    /// server has the job at all. Real counted work, not a placeholder.
+    let localOCR: DocumentOCR.Progress?
     let onCancel: () -> Void
 
     /// True once the first reply has been slow enough to need explaining.
@@ -44,7 +47,20 @@ struct ConversionProgressView: View {
 
             // Only ever shows a percentage the backend actually reported —
             // never a synthetic animation (spec section 40).
-            if let progress {
+            if let localOCR, localOCR.pagesTotal > 0 {
+                // Measured progress over pages this device has actually read,
+                // so a long scan shows movement instead of an endless spinner.
+                ProgressView(value: localOCR.fraction)
+                    .tint(Color.accentColor)
+                HStack {
+                    Text("Reading the scan on this iPhone")
+                    Spacer()
+                    Text("Page \(localOCR.pagesDone) / \(localOCR.pagesTotal)")
+                        .monospacedDigit()
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            } else if let progress {
                 ProgressView(value: Double(progress.percent), total: 100)
                     .tint(Color.accentColor)
 
@@ -81,6 +97,10 @@ struct ConversionProgressView: View {
     }
 
     private var accessibilitySummary: String {
+        if let localOCR, localOCR.pagesTotal > 0 {
+            return "Reading the scan on this iPhone, "
+                + "page \(localOCR.pagesDone) of \(localOCR.pagesTotal)"
+        }
         guard let progress else { return "Uploading document" }
         var parts = ["\(progress.percent) percent complete", progress.status.displayName]
         if progress.totalPages > 0 && progress.page > 0 {

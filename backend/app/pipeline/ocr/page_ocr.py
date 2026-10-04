@@ -8,7 +8,8 @@ import fitz
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.document import Block, Span, TextDirection
+from app.models.document import Block
+from app.pipeline.ocr.blocks import PlacedWord, blocks_from_placed_words
 from app.pipeline.ocr.engine import OCRResult, OCRWord, run_ocr, tesseract_available
 
 logger = get_logger(__name__)
@@ -148,72 +149,39 @@ def ocr_page(
     scale = 72.0 / dpi
     origin_x, origin_y = page.rect.x0, page.rect.y0
 
-    blocks: list[Block] = []
-    for block_index, lines in sorted(_group_lines_into_blocks(result.words).items()):
-        spans: list[Span] = []
-        line_texts: list[str] = []
-        confidences: list[float] = []
-        block_x0 = block_y0 = float("inf")
-        block_x1 = block_y1 = float("-inf")
-
+    # Tesseract's coordinates are image pixels in whatever orientation read
+    # best; unrotate each word and scale it into the page's own space, then
+    # hand over to the shared builder so a Block from here is identical to a
+    # Block from a client's own OCR.
+    grouped: list[list[list[PlacedWord]]] = []
+    for _, lines in sorted(_group_lines_into_blocks(result.words).items()):
+        block_lines: list[list[PlacedWord]] = []
         for line_words in lines:
-            parts: list[str] = []
-            for word_index, word in enumerate(line_words):
+            placed: list[PlacedWord] = []
+            for word in line_words:
                 bbox = unrotate_bbox(word.bbox, rotation, rotated_w, rotated_h)
-                pdf_bbox = (
-                    origin_x + bbox[0] * scale,
-                    origin_y + bbox[1] * scale,
-                    origin_x + bbox[2] * scale,
-                    origin_y + bbox[3] * scale,
-                )
-                text = word.text if word_index == 0 else f" {word.text}"
-                parts.append(text)
-                confidences.append(word.confidence)
-                block_x0 = min(block_x0, pdf_bbox[0])
-                block_y0 = min(block_y0, pdf_bbox[1])
-                block_x1 = max(block_x1, pdf_bbox[2])
-                block_y1 = max(block_y1, pdf_bbox[3])
-                spans.append(
-                    Span(
-                        text=text,
-                        bbox=pdf_bbox,
-                        font="OCR",
-                        font_size=round(pdf_bbox[3] - pdf_bbox[1], 2),
-                        bold=False,
-                        italic=False,
-                        baseline=round(pdf_bbox[3], 2),
-                        ocr_confidence=word.confidence,
+                placed.append(
+                    PlacedWord(
+                        text=word.text,
+                        bbox=(
+                            origin_x + bbox[0] * scale,
+                            origin_y + bbox[1] * scale,
+                            origin_x + bbox[2] * scale,
+                            origin_y + bbox[3] * scale,
+                        ),
+                        confidence=word.confidence,
                     )
                 )
-            if spans:
-                spans[-1].line_break_after = True
-            line_texts.append("".join(parts))
+            if placed:
+                block_lines.append(placed)
+        if block_lines:
+            grouped.append(block_lines)
 
-        if not spans:
-            continue
-
-        font_sizes = sorted(s.font_size for s in spans)
-        blocks.append(
-            Block(
-                block_id=f"p{page_num}_ocr{block_index:03d}",
-                page=page_num,
-                page_width=page.rect.width,
-                page_height=page.rect.height,
-                bbox=(block_x0, block_y0, block_x1, block_y1),
-                kind="text",
-                text="\n".join(line_texts),
-                spans=spans,
-                font="OCR",
-                font_size=font_sizes[len(font_sizes) // 2],
-                baseline=spans[-1].baseline,
-                line_id=f"p{page_num}_ocrl{block_index:03d}000",
-                source="ocr",
-                ocr_confidence=sum(confidences) / len(confidences),
-                direction=TextDirection.LTR,
-            )
-        )
-
+    blocks = blocks_from_placed_words(
+        grouped, page_num, page.rect.width, page.rect.height, id_prefix="ocr"
+    )
     mean_confidence = result.mean_confidence
+
     reliable = mean_confidence >= settings.ocr_min_region_confidence and bool(blocks)
     if not reliable:
         logger.info(

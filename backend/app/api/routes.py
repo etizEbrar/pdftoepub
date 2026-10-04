@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 
 from app.api.ratelimit import SlidingWindowLimiter, client_key
 from app.core.config import settings
@@ -18,8 +19,13 @@ from app.models.api import (
     ConversionResultResponse,
     ConversionSummaryResponse,
 )
+from app.models.client_ocr import ClientOCR
 from app.models.job import ConversionMode, Job, JobStage
-from app.storage.temp_storage import delete_job_files, upload_path_for
+from app.storage.temp_storage import (
+    client_ocr_path_for,
+    delete_job_files,
+    upload_path_for,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/conversions", tags=["conversions"])
@@ -61,6 +67,7 @@ async def create_conversion(
     request: Request,
     file: UploadFile = File(...),
     mode: ConversionMode = Form(default=ConversionMode.MAXIMUM_ACCURACY),
+    ocr: UploadFile | None = File(default=None),
 ) -> ConversionCreatedResponse:
     caller = client_key(request)
     if settings.rate_limit_enabled:
@@ -103,6 +110,41 @@ async def create_conversion(
         delete_job_files(job_id)
         _refund(caller)
         raise
+
+    # A client that OCR'd the scan itself sends what it read. Parsed here so a
+    # malformed payload is a 422 at the door rather than a failure twenty
+    # minutes into a conversion, and written to disk because a long book's
+    # words and boxes are tens of megabytes.
+    client_ocr_pages = 0
+    if ocr is not None:
+        raw = await ocr.read()
+        if raw:
+            if len(raw) > settings.max_client_ocr_mb * 1024 * 1024:
+                delete_job_files(job_id)
+                _refund(caller)
+                raise FileTooLargeError(
+                    f"The recognised text is larger than the "
+                    f"{settings.max_client_ocr_mb}MB limit."
+                )
+            try:
+                payload = ClientOCR.model_validate_json(raw)
+            except ValidationError as exc:
+                delete_job_files(job_id)
+                _refund(caller)
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"The recognised text could not be read: {exc.error_count()} problems.",
+                ) from exc
+            by_page = payload.by_page()
+            if by_page:
+                client_ocr_path_for(job_id).write_bytes(raw)
+                client_ocr_pages = len(by_page)
+                logger.info(
+                    "job %s: client supplied OCR for %d pages (engine=%s)",
+                    job_id,
+                    client_ocr_pages,
+                    payload.engine,
+                )
 
     job = Job(
         job_id=job_id,

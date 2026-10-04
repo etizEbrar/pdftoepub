@@ -151,6 +151,8 @@ class TestHealthEndpoint:
             "ai_provider",
             "max_upload_mb",
             "max_page_count",
+            "accepts_client_ocr",
+            "max_client_ocr_mb",
         }, f"unexpected keys: {set(body)}"
         assert body["status"] == "ok"
         # No paths, secrets, versions or environment details.
@@ -174,6 +176,16 @@ class TestHealthEndpoint:
         assert body["max_upload_mb"] > 0
         assert isinstance(body["max_page_count"], int)
         assert body["max_page_count"] > 0
+
+    def test_health_says_whether_client_ocr_is_accepted(self):
+        """A phone decides whether to spend its battery based on this."""
+        import app.main
+
+        from fastapi.testclient import TestClient
+
+        body = TestClient(app.main.app).get("/health").json()
+        assert body["accepts_client_ocr"] is True
+        assert body["max_client_ocr_mb"] > 0
 
 
 class TestRateLimiting:

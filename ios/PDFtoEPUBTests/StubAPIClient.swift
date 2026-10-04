@@ -44,8 +44,15 @@ final class StubAPIClient: APIClient, @unchecked Sendable {
         return capabilities
     }
 
-    func createConversion(fileURL: URL, mode: ConversionMode) async throws -> ConversionCreatedResponse {
+    /// The payload the last upload carried, so a test can assert that OCR this
+    /// device performed actually reached the request.
+    private(set) var lastClientOCR: URL?
+
+    func createConversion(
+        fileURL: URL, mode: ConversionMode, clientOCR: URL?
+    ) async throws -> ConversionCreatedResponse {
         createCallCount += 1
+        lastClientOCR = clientOCR
         return try createResult.get()
     }
 

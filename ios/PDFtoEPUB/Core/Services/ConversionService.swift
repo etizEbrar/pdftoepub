@@ -15,9 +15,47 @@ actor ConversionService {
         try await client.fetchCapabilities()
     }
 
-    func start(document: SelectedDocument, mode: ConversionMode) async throws -> String {
-        let created = try await client.createConversion(fileURL: document.url, mode: mode)
+    /// Recognise the document's scanned pages here, then upload the text with it.
+    ///
+    /// The server charges ~110 seconds a page for OCR on its free tier and this
+    /// device charges about two, so for any scanned book this is the difference
+    /// between a conversion that finishes and one that times out. A document
+    /// with a text layer needs none of it and skips straight to the upload.
+    func start(
+        document: SelectedDocument,
+        mode: ConversionMode,
+        onOCRProgress: @Sendable @escaping (DocumentOCR.Progress) -> Void = { _ in }
+    ) async throws -> String {
+        let ocrFile = try? await Self.recogniseLocally(
+            document: document, onProgress: onOCRProgress
+        )
+        defer { if let ocrFile { try? FileManager.default.removeItem(at: ocrFile) } }
+        let created = try await client.createConversion(
+            fileURL: document.url, mode: mode, clientOCR: ocrFile
+        )
         return created.id
+    }
+
+    /// Returns a temp file holding the payload, or nil when there is nothing to
+    /// send. Written to disk so the upload can stream it rather than hold a
+    /// long book's worth of boxes in memory beside the PDF.
+    private static func recogniseLocally(
+        document: SelectedDocument,
+        onProgress: @Sendable @escaping (DocumentOCR.Progress) -> Void
+    ) async throws -> URL? {
+        let scoped = document.url.startAccessingSecurityScopedResource()
+        defer { if scoped { document.url.stopAccessingSecurityScopedResource() } }
+
+        guard
+            let payload = try await DocumentOCR().recognise(
+                documentAt: document.url, onProgress: onProgress
+            )
+        else { return nil }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("client-ocr-\(UUID().uuidString).json")
+        try payload.jsonData().write(to: url, options: .atomic)
+        return url
     }
 
     /// Polls progress until the job reaches a terminal state, invoking

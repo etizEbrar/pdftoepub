@@ -20,6 +20,11 @@ final class ConversionViewModel {
 
     private(set) var phase: Phase = .idle
     private(set) var progress: ConversionProgress?
+    /// Non-nil only while this device is reading a scanned book with Vision.
+    /// The server reports nothing during that time because it has not been
+    /// given the job yet, so without this the screen would sit on a bare
+    /// spinner for the minutes the OCR takes.
+    private(set) var localOCR: DocumentOCR.Progress?
     var selectedMode: ConversionMode
 
     private let settings: AppSettings
@@ -145,7 +150,14 @@ final class ConversionViewModel {
                     return
                 }
 
-                let jobID = try await service.start(document: document, mode: mode)
+                let jobID = try await service.start(
+                    document: document,
+                    mode: mode,
+                    onOCRProgress: { update in
+                        Task { @MainActor [weak self] in self?.localOCR = update }
+                    }
+                )
+                await MainActor.run { self.localOCR = nil }
                 await MainActor.run { self.currentJobID = jobID }
 
                 let result = try await service.awaitCompletion(id: jobID) { update in
@@ -175,9 +187,15 @@ final class ConversionViewModel {
                     self.phase = .completed(document, report, epubURL: epubURL)
                 }
             } catch is CancellationError {
-                await MainActor.run { self.phase = .documentSelected(document) }
+                await MainActor.run {
+                    self.localOCR = nil
+                    self.phase = .documentSelected(document)
+                }
             } catch let error as APIError {
-                await MainActor.run { self.phase = .failed(Self.failure(from: error)) }
+                await MainActor.run {
+                    self.localOCR = nil
+                    self.phase = .failed(Self.failure(from: error))
+                }
             } catch {
                 await MainActor.run {
                     self.phase = .failed(
@@ -195,6 +213,7 @@ final class ConversionViewModel {
     func cancelConversion() {
         conversionTask?.cancel()
         conversionTask = nil
+        localOCR = nil
         if let document = selectedDocument {
             phase = .documentSelected(document)
         } else {

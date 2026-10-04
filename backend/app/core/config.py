@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
     job_ttl_hours: int = 24
     max_upload_mb: int = 200
+    # A client's own OCR for a long scanned book is tens of megabytes of words
+    # and boxes. Bounded for the same reason the PDF is: so one request cannot
+    # spend the whole container on itself.
+    max_client_ocr_mb: int = 60
     # A crafted PDF can declare an enormous page count and occupy a worker
     # indefinitely. Refuse up front rather than discovering it mid-conversion.
     max_page_count: int = 2000

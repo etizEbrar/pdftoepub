@@ -21,6 +21,16 @@ def upload_path_for(job_id: str, filename: str) -> Path:
     return job_dir(job_id) / "source" / safe_name
 
 
+def client_ocr_path_for(job_id: str) -> Path:
+    """Where a client's own OCR for this job is parked.
+
+    Written to disk rather than held in memory: a 253-page scanned book's words
+    and boxes are tens of megabytes of JSON, and this server has 512 MB. It
+    sits beside the upload and is removed with it.
+    """
+    return job_dir(job_id) / "source" / "client-ocr.json"
+
+
 def images_dir_for(job_id: str) -> Path:
     d = job_dir(job_id) / "images"
     d.mkdir(parents=True, exist_ok=True)

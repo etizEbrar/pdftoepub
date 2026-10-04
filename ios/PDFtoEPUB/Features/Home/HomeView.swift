@@ -24,6 +24,7 @@ struct HomeView: View {
                     ConversionProgressView(
                         document: document,
                         progress: viewModel.progress,
+                        localOCR: viewModel.localOCR,
                         onCancel: viewModel.cancelConversion
                     )
                 case .completed(let document, let report, let epubURL):

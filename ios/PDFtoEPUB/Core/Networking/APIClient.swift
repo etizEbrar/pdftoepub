@@ -4,7 +4,9 @@ import Foundation
 /// live backend (see PDFtoEPUBTests/StubAPIClient.swift).
 protocol APIClient: Sendable {
     func fetchCapabilities() async throws -> BackendCapabilities
-    func createConversion(fileURL: URL, mode: ConversionMode) async throws -> ConversionCreatedResponse
+    func createConversion(
+        fileURL: URL, mode: ConversionMode, clientOCR: URL?
+    ) async throws -> ConversionCreatedResponse
     func fetchProgress(id: String) async throws -> ConversionProgress
     func fetchSummary(id: String) async throws -> ConversionSummary
     func fetchResult(id: String) async throws -> ConversionResult
@@ -57,7 +59,9 @@ final class LiveAPIClient: APIClient {
         baseURL.appendingPathComponent(path)
     }
 
-    func createConversion(fileURL: URL, mode: ConversionMode) async throws -> ConversionCreatedResponse {
+    func createConversion(
+        fileURL: URL, mode: ConversionMode, clientOCR: URL? = nil
+    ) async throws -> ConversionCreatedResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: endpoint("v1/conversions"))
         request.httpMethod = "POST"
@@ -70,7 +74,8 @@ final class LiveAPIClient: APIClient {
             fileURL: fileURL,
             filename: fileURL.lastPathComponent,
             mode: mode,
-            boundary: boundary
+            boundary: boundary,
+            clientOCR: clientOCR
         )
         defer { try? FileManager.default.removeItem(at: bodyFileURL) }
 

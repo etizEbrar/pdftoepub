@@ -135,4 +135,8 @@ async def health() -> dict:
         "ai_provider": settings.ai_provider,
         "max_upload_mb": settings.max_upload_mb,
         "max_page_count": settings.max_page_count,
+        # Tells a client it is worth doing OCR on its own hardware: a scanned
+        # page costs ~110s here and ~1.8s on a phone's Neural Engine.
+        "accepts_client_ocr": True,
+        "max_client_ocr_mb": settings.max_client_ocr_mb,
     }
