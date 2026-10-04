@@ -386,3 +386,35 @@ class TestWrappedTitles:
         nodes = self._nodes("BÖLÜM 3 VERİ YAPILARI", "KAYNAKÇA")
         blocks = self._blocks(("BÖLÜM 3 VERİ YAPILARI", 12.0), ("KAYNAKÇA", 12.0))
         assert merge_wrapped_titles(nodes, blocks) == 0
+
+
+class TestOCRNoiseIsNotAChapter:
+    """A scanned page gives unreliable type sizes, so junk reaches the scorer.
+
+    Measured on a real 567-page scanned grammar book: the navigation listed
+    "Vy", "UPUP pwr w" and a numbered exercise sentence as chapters, beside
+    the real ones. Font metrics cannot sort these out — on an OCR'd page they
+    are noise — so the text itself has to.
+    """
+
+    def test_a_fragment_with_no_pronounceable_word_is_not_a_heading(self):
+        """"Vy" is what is left of a running head after OCR."""
+        for junk in ("Vy", "qq", "Wm", "l1"):
+            block = _block(junk, size=BODY * 1.5, bold=True, centred=True)
+            assert _score(block, sparse=True, first=True).score == 0.0, junk
+
+    def test_a_real_short_title_still_scores(self):
+        """Two of the shortest real chapter titles there are."""
+        for title in ("Kurban", "Sis", "BÖLÜM 4", "Son"):
+            block = _block(title, size=BODY * 1.5, bold=True, centred=True)
+            assert _score(block, sparse=True, first=True).score > 0.0, title
+
+    def test_a_sentence_carrying_its_own_full_stop_is_prose(self):
+        exercise = "2. Since classes began, I (have, not) free time. I (have)"
+        block = _block(exercise, size=BODY * 1.15, bold=True)
+        assert _score(block, sparse=True, first=True).score == 0.0
+
+    def test_a_title_with_an_abbreviation_is_not_mistaken_for_prose(self):
+        """"Dr." is a full stop inside a title, and the title is short."""
+        block = _block("Dr. Faustus", size=BODY * 1.6, bold=True, centred=True)
+        assert _score(block, sparse=True, first=True).score > 0.0

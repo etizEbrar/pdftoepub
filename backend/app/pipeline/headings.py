@@ -119,6 +119,25 @@ _OPENS_AS_QUOTE_RE = re.compile(r'^\s*[«"“”\'‘’]')
 # real 168-page volume, putting an ISBN and half a reference in the navigation.
 _ISBN_RE = re.compile(r"\bISBN\b", re.IGNORECASE)
 
+# A scanned page's type sizes are unreliable, so OCR leftovers reach the
+# scorer with every geometric signal a real heading has. Two things separate
+# them from a title, and both are in the text rather than the metrics.
+#
+# A title names something, so it contains at least one pronounceable word: a
+# run of three or more letters with a vowel in it. "Vy", "qq" and "l1" are
+# what is left of a running head or a page number after OCR, and a real book's
+# shortest titles ("Sis", "Son", "Kurban") all clear the bar.
+_PRONOUNCEABLE_RE = re.compile(
+    r"[^\W\d_]*[aeıioöuüAEIİOÖUÜàâäéèêëíîïóôöúûüyY][^\W\d_]*",
+    re.UNICODE,
+)
+_WORDISH_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+# A full stop inside the line, followed by a space and another sentence, means
+# prose. Abbreviations ("Dr. Faustus") do the same, so this only applies past
+# the length at which a title would already have ended.
+_INTERNAL_SENTENCE_RE = re.compile(r"[.?!]\s+[^\s]")
+_PROSE_MIN_CHARS = 40
+
 # Score at or above which a block is accepted as a heading, and the score that
 # additionally marks it as a top-level division. Both are deliberately high:
 # inventing chapters to raise a count is worse than reporting thin structure.
@@ -177,6 +196,11 @@ def score_heading(
     # An ISBN names no chapter, and a line closing a parenthesis it never
     # opened is the tail of something that began on the page before.
     if _ISBN_RE.search(text) or text.count(")") > text.count("("):
+        return HeadingEvidence(0.0, signals, False)
+    # OCR leftovers and prose that happens to be set like a heading.
+    if not any(_PRONOUNCEABLE_RE.fullmatch(w) for w in _WORDISH_RE.findall(text)):
+        return HeadingEvidence(0.0, signals, False)
+    if len(text) >= _PROSE_MIN_CHARS and _INTERNAL_SENTENCE_RE.search(text):
         return HeadingEvidence(0.0, signals, False)
 
     # A heading occupies one line, occasionally two when a long title wraps.

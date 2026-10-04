@@ -70,17 +70,29 @@ def render_inline(text: str, resolve_note_href: Callable[[str], str]) -> str:
     for m in _PLACEHOLDER_RE.finditer(text):
         parts.append(_escape_with_emphasis(text[last : m.start()]))
         kind = m.group(1)
-        args = m.group(2).split(":")
+        payload = m.group(2)
+        # The marker is the last field and is whatever the page said, so it can
+        # contain a colon -- OCR of a scanned page produces "1:2" readily.
+        # Splitting the payload on every colon and demanding a fixed number of
+        # fields lost a whole 567-page book to one such marker. The ids ahead
+        # of it are generated and colon-free, so a bounded split is exact.
         if kind == "NOTEREF":
-            footnote_node_id, ref_id, marker = args
+            footnote_node_id, _, rest = payload.partition(":")
+            ref_id, _, marker = rest.partition(":")
+            if not ref_id:
+                # Not a shape this writer produces. One unreadable marker must
+                # not cost the reader the other 566 pages, so it renders as the
+                # text it already is.
+                parts.append(_escape_with_emphasis(m.group(0)))
+                last = m.end()
+                continue
             href = resolve_note_href(footnote_node_id)
             parts.append(
                 f'<a epub:type="noteref" class="noteref" href="{xml_escape(href)}" '
                 f'id="{xml_escape(ref_id)}">{xml_escape(marker)}</a>'
             )
         elif kind == "SUP":
-            (marker,) = args
-            parts.append(f"<sup>{xml_escape(marker)}</sup>")
+            parts.append(f"<sup>{xml_escape(payload)}</sup>")
         last = m.end()
     parts.append(_escape_with_emphasis(text[last:]))
     return "".join(parts)

@@ -107,3 +107,38 @@ def test_render_inline_combines_emphasis_with_note_references():
     out = render_inline(text, _noop_href)
     assert "<em>cited</em>" in out
     assert 'epub:type="noteref"' in out
+
+
+class TestMarkersContainingAColon:
+    """A colon in a note marker must not cost the reader the whole book.
+
+    Found on a real 567-page scanned grammar book: the conversion died with
+    "ValueError: too many values to unpack (expected 1)" in render_inline.
+    The placeholder is "{{SUP:<marker>}}", the marker is whatever the page
+    said, and the parser split the whole payload on ":" and demanded exactly
+    one field. OCR of a scanned page produces markers like "1:2" readily, and
+    one of them failed the entire 567 pages rather than that one marker.
+    """
+
+    def test_a_superscript_marker_keeps_its_colon(self):
+        out = render_inline("Bak{{SUP:1:2}} ve devam", lambda nid: "#x")
+        assert "<sup>1:2</sup>" in out
+
+    def test_a_noteref_marker_keeps_its_colon(self):
+        out = render_inline("Bak{{NOTEREF:fn_7:ref_7:1:2}}", lambda nid: f"#{nid}")
+        assert 'href="#fn_7"' in out
+        assert 'id="ref_7"' in out
+        assert ">1:2</a>" in out
+
+    def test_an_ordinary_marker_is_unchanged(self):
+        assert "<sup>3</sup>" in render_inline("Bak{{SUP:3}}", lambda nid: "#x")
+        out = render_inline("Bak{{NOTEREF:fn_1:ref_1:4}}", lambda nid: f"#{nid}")
+        assert ">4</a>" in out
+
+    def test_a_marker_that_is_only_a_colon_still_renders(self):
+        assert "<sup>:</sup>" in render_inline("Bak{{SUP::}}", lambda nid: "#x")
+
+    def test_a_malformed_noteref_does_not_lose_the_book(self):
+        """Whatever arrives, the chapter still renders."""
+        out = render_inline("Bak{{NOTEREF:onlyonefield}} devam", lambda nid: "#x")
+        assert "devam" in out
