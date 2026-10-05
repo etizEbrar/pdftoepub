@@ -37,12 +37,18 @@ struct HomeView: View {
                 case .failed(let failure):
                     ConversionErrorView(
                         failure: failure,
+                        attemptedAddress: settings.baseURLString,
+                        isOverridingBuiltInAddress: settings.isOverridingBuiltInAddress,
                         onRetry: viewModel.retry,
                         onChooseDifferent: {
                             viewModel.clearSelection()
                             isImporterPresented = true
                         },
-                        onOpenSettings: { isSettingsPresented = true }
+                        onOpenSettings: { isSettingsPresented = true },
+                        onUseBuiltInServer: {
+                            settings.resetToBuiltInAddress()
+                            viewModel.retry()
+                        }
                     )
                 }
             }

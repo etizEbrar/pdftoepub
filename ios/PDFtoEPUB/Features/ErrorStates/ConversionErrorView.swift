@@ -2,9 +2,20 @@ import SwiftUI
 
 struct ConversionErrorView: View {
     let failure: ConversionViewModel.ConversionFailure
+    /// The address the app actually tried, shown for connectivity failures.
+    ///
+    /// Its absence cost a real debugging session: the app had been pointed at
+    /// a temporary tunnel that had since been shut down, and "Can't reach the
+    /// server" gave no hint that it was not even trying the app's own server.
+    /// Naming the address makes a stale override obvious at a glance.
+    let attemptedAddress: String?
+    /// True when that address is a user override rather than the built-in one,
+    /// so the fix — one tap — can be offered here instead of inside Settings.
+    let isOverridingBuiltInAddress: Bool
     let onRetry: () -> Void
     let onChooseDifferent: () -> Void
     let onOpenSettings: () -> Void
+    let onUseBuiltInServer: () -> Void
 
     /// Failures the user fixes in Settings, not by picking another file.
     private var isConfigurationProblem: Bool {
@@ -32,6 +43,16 @@ struct ConversionErrorView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if isConfigurationProblem, let attemptedAddress, !attemptedAddress.isEmpty {
+                    Text(attemptedAddress)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                        .accessibilityLabel("Tried to reach \(attemptedAddress)")
+                }
+
                 // Nothing was converted yet in the not-configured case, so the
                 // reassurance would be noise.
                 if failure.code != "backend_not_configured" {
@@ -47,8 +68,19 @@ struct ConversionErrorView: View {
 
             VStack(spacing: Theme.Spacing.tight) {
                 if isConfigurationProblem {
-                    Button("Open Settings", action: onOpenSettings)
-                        .buttonStyle(PrimaryButtonStyle())
+                    // Offered first when the address is an override: a stale
+                    // one is the likeliest reason a working app stops
+                    // reaching anything, and this is the whole fix.
+                    if isOverridingBuiltInAddress {
+                        Button("Use the app's own server", action: onUseBuiltInServer)
+                            .buttonStyle(PrimaryButtonStyle())
+                            .accessibilityIdentifier("error.useBuiltInServer")
+                        Button("Open Settings", action: onOpenSettings)
+                            .buttonStyle(SecondaryButtonStyle())
+                    } else {
+                        Button("Open Settings", action: onOpenSettings)
+                            .buttonStyle(PrimaryButtonStyle())
+                    }
                     if failure.isRetryable {
                         Button("Try again", action: onRetry)
                             .buttonStyle(SecondaryButtonStyle())

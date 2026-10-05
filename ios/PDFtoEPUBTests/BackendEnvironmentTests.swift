@@ -231,3 +231,71 @@ extension BackendEnvironmentSeparationTests {
     }
     #endif
 }
+
+/// Recovering from an address that has stopped existing.
+///
+/// A real session ended here: the app was pointed at a temporary Cloudflare
+/// tunnel, the tunnel was shut down when the session that created it ended,
+/// and from then on every conversion failed with "Can't reach the server"
+/// while the app's own backend was up the whole time. Nothing on screen named
+/// the address being tried, and the reset lived inside Settings.
+final class StaleAddressRecoveryTests: XCTestCase {
+
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "backend.baseURL")
+    }
+
+    override func tearDown() {
+        defaults.removeObject(forKey: "backend.baseURL")
+        super.tearDown()
+    }
+
+    func testAFreshInstallIsNotTreatedAsAnOverride() {
+        let settings = AppSettings()
+        XCTAssertFalse(
+            settings.isOverridingBuiltInAddress,
+            "the built-in address must not offer to reset to itself"
+        )
+    }
+
+    func testATunnelAddressCountsAsAnOverride() {
+        let settings = AppSettings()
+        settings.baseURLString = "https://conservation-organization.trycloudflare.com"
+        XCTAssertTrue(settings.isOverridingBuiltInAddress)
+    }
+
+    func testResettingRestoresTheBuiltInAddress() {
+        let settings = AppSettings()
+        settings.baseURLString = "https://something-that-is-gone.trycloudflare.com"
+        settings.resetToBuiltInAddress()
+
+        XCTAssertEqual(settings.baseURLString, BackendEnvironment.defaultBaseURLString ?? "")
+        XCTAssertFalse(settings.isOverridingBuiltInAddress)
+    }
+
+    func testTheResetSurvivesBeingReadBackFromDisk() {
+        /// The override is persisted, so the reset has to be too — otherwise
+        /// the dead address returns on the next launch.
+        let settings = AppSettings()
+        settings.baseURLString = "https://gone.trycloudflare.com"
+        settings.resetToBuiltInAddress()
+
+        let reloaded = AppSettings()
+        XCTAssertEqual(reloaded.baseURLString, BackendEnvironment.defaultBaseURLString ?? "")
+    }
+
+    func testWhitespaceAroundAPastedAddressIsNotAnOverride() throws {
+        /// Pasting from a terminal brings a trailing newline with it.
+        let builtIn = try XCTUnwrap(
+            BackendEnvironment.defaultBaseURLString,
+            "this build has no built-in address"
+        )
+        let settings = AppSettings()
+        settings.baseURLString = "  \(builtIn)\n"
+        XCTAssertFalse(settings.isOverridingBuiltInAddress)
+    }
+}
