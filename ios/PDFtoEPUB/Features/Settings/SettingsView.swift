@@ -67,9 +67,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("AI assistance", value: "Optional, off by default")
+                    // The live value, not a claim. The server reports which
+                    // provider it is actually using, and "Test connection"
+                    // above is what fetches it — so this row can never drift
+                    // from what the service is really doing, which is what the
+                    // privacy policy points readers at.
+                    LabeledContent("Structural review", value: aiProviderDescription)
                 } footer: {
-                    Text("Conversions run entirely with deterministic, local processing — including OCR, tables, formulas and right-to-left text — and never require a paid AI service. Optional AI review is configured on your own server, not in this app.")
+                    Text("Your scan is read on this iPhone and the conversion runs on deterministic software. Where a fragment is too ambiguous to place — common on scanned pages — the server can ask Claude to classify just that fragment and its neighbours, never your document. Tap Test connection to see which provider this server is using.")
                 }
 
                 Section {
@@ -85,6 +90,20 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    /// What the server last said it was using, rather than what we assume.
+    private var aiProviderDescription: String {
+        switch connectionState {
+        case .reachable(let provider) where provider == "none":
+            return "Not in use"
+        case .reachable(let provider) where provider == "anthropic":
+            return "Claude, for ambiguous fragments"
+        case .reachable(let provider):
+            return provider
+        case .untested, .checking, .unreachable:
+            return "Tap Test connection"
         }
     }
 

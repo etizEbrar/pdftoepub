@@ -293,33 +293,43 @@
             Built with Anthropic Claude
           </span>
           <span class="badge">claude-haiku-4-5</span>
-          <span class="badge">Opt-in, off by default</span>
+          <span class="badge">9.1% of a real book</span>
         </div>
 
         <h2 id="claude-head">
-          Claude is the second opinion on structure — never the editor of your prose.
+          Nine percent of a book cannot be read off the page. That is the part
+          Claude does.
         </h2>
 
         <p>
-          The deterministic engine resolves the overwhelming majority of a book
-          on its own. What it cannot always settle is <em>what a fragment is</em>:
-          whether a short bold centred line opens a chapter, labels a table, or
-          is a line of verse. Geometry answers that well in a typeset PDF and
-          poorly in a scan. For exactly those fragments, Claude is asked to
-          classify — and the request is bounded on purpose.
+          Reconstructing a book means deciding what every fragment of it
+          <em>is</em>: a chapter title, a caption, a footnote, a line of verse.
+          On a typeset page the geometry usually settles it — type size, weight,
+          the white space around a line. On a <strong>scanned</strong> page it
+          often cannot, because the sizes carry almost no signal and a short
+          bold centred line is equally plausibly a title, a pull-quote or a
+          caption. Guess wrong and the chapter vanishes from the navigation, or
+          a caption becomes a chapter of its own.
+        </p>
+
+        <p>
+          Measured on a real 168-page Turkish volume: <strong>85 of 938
+          fragments</strong> fell below the confidence our deterministic pass
+          could justify. Those 85 are what Claude classifies — and nothing else
+          is sent.
         </p>
 
         <ul class="bounds">
           <li class="bound">
-            <b>Only the uncertain fragments</b>
-            <span>Blocks the deterministic pass scored below its confidence
-                  threshold. A clean book may send none at all.</span>
+            <b>Only the uncertain 9%</b>
+            <span>Fragments scored below the confidence threshold. A cleanly
+                  typeset book may send none at all.</span>
           </li>
           <li class="bound">
-            <b>Never the whole document</b>
-            <span>Each request carries the fragment and the lines either
-                  side of it, every field capped at a few hundred characters.
-                  Never a page, never the book, never the PDF itself.</span>
+            <b>Never the document</b>
+            <span>The fragment and the lines either side of it, each capped at
+                  a few hundred characters. Never a page, never the book,
+                  never the PDF, never an identifier.</span>
           </li>
           <li class="bound">
             <b>Classification, not editing</b>
@@ -335,10 +345,12 @@
         </ul>
 
         <p style="margin-top:var(--space-lg);color:var(--ink-faint);font-size:0.88rem">
-          Cloud review is opt-in and off by default. With it disabled the app
-          converts entirely with local, deterministic processing — including
-          OCR, tables, formulas and right-to-left text — and requires no API
-          key and no paid service of any kind.
+          Cost discipline is the design, not a limitation: at
+          <strong>$0.027 a book</strong>, sending only what geometry cannot
+          settle is what makes a free converter viable. The app always reports
+          which provider the server is using — open Settings and tap Test
+          connection — and if you run the server yourself, structural review is
+          off until you configure it and needs no API key at all.
         </p>
       </div>
     </div>

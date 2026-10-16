@@ -21,9 +21,22 @@ services:
         value: "8000"
       - key: ENVIRONMENT
         value: production
-      # No paid AI, ever. The conversion is deterministic and local.
+      # Structural review of the fragments our own pass cannot place --
+      # measured at 85 of 938 on a real 168-page book, about $0.027 of Haiku
+      # per book. Falls back to the free local provider when no key is set,
+      # and /health reports the provider actually in use rather than this
+      # value, so a missing key can never look like a cloud call.
+      # Stays "none" until the App Store privacy disclosure and review notes
+      # say otherwise: the shipped app currently tells Apple no data reaches a
+      # third party, and flipping this first would make that false. The code
+      # path, its request-shape tests and the rewritten privacy policy are all
+      # in place, so enabling it is this one value plus a dashboard secret.
       - key: AI_PROVIDER
         value: none
+      # sync:false means Render prompts for this in the dashboard and keeps it
+      # out of the blueprint. It must never be committed.
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
       # OCR stays ON. Turning it off does not degrade a scanned book, it fails
       # it outright — "No extractable text was found in this PDF" — and scanned

@@ -401,3 +401,40 @@ class TestOCRBudget:
             elapsed_total=1.0, budget=1500.0,
         )
         assert not exceeded
+
+
+class TestHealthReportsTheProviderActuallyInUse:
+    """The privacy policy points readers at this value, so it has to be true.
+
+    /health used to echo the *configured* AI_PROVIDER. Those differ: selecting
+    "anthropic" without an API key falls back to the local, no-network
+    provider, so the endpoint would have claimed Claude was in use while
+    nothing left the server. The app's Settings screen shows this value and the
+    privacy policy calls it authoritative, so an echo is not good enough.
+    """
+
+    def test_a_cloud_provider_without_a_key_does_not_claim_the_cloud(self, client, monkeypatch):
+        from app.core.config import settings as live
+
+        monkeypatch.setattr(live, "ai_provider", "anthropic")
+        monkeypatch.setattr(live, "anthropic_api_key", None)
+        assert client.get("/health").json()["ai_provider"] == "local"
+
+    def test_a_cloud_provider_with_a_key_says_so(self, client, monkeypatch):
+        from app.core.config import settings as live
+
+        monkeypatch.setattr(live, "ai_provider", "anthropic")
+        monkeypatch.setattr(live, "anthropic_api_key", "sk-ant-not-a-real-key")
+        assert client.get("/health").json()["ai_provider"] == "anthropic"
+
+    def test_the_default_still_reports_none(self, client, monkeypatch):
+        from app.core.config import settings as live
+
+        monkeypatch.setattr(live, "ai_provider", "none")
+        assert client.get("/health").json()["ai_provider"] == "none"
+
+    def test_an_unimplemented_provider_is_not_claimed_either(self, client, monkeypatch):
+        from app.core.config import settings as live
+
+        monkeypatch.setattr(live, "ai_provider", "openai")
+        assert client.get("/health").json()["ai_provider"] == "local"

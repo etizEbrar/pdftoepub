@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.ratelimit import SlidingWindowLimiter, client_key
 from app.api.routes import register_routes
 from app.core.config import settings
+from app.pipeline.ai.provider import resolve_provider_name
 from app.core.errors import ConversionError
 from app.core.logging import configure_logging, get_logger
 from app.jobs.instance import job_queue
@@ -132,7 +133,9 @@ async def health() -> dict:
     """
     return {
         "status": "ok",
-        "ai_provider": settings.ai_provider,
+        "ai_provider": resolve_provider_name(
+            settings.ai_provider, anthropic_api_key=settings.anthropic_api_key
+        ),
         "max_upload_mb": settings.max_upload_mb,
         "max_page_count": settings.max_page_count,
         # Tells a client it is worth doing OCR on its own hardware: a scanned

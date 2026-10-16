@@ -53,6 +53,28 @@ class AIProvider(Protocol):
         ...
 
 
+def resolve_provider_name(name: str, *, anthropic_api_key: str | None = None) -> str:
+    """The provider that `get_provider` would actually return, by name.
+
+    Separate from `get_provider` because /health has to answer this on every
+    request and must not build an API client to do it. The two must agree:
+    the privacy policy tells readers that the value the app displays is the
+    authoritative answer for what the server is doing, so echoing the
+    *configured* name would turn a missing API key into a false claim that
+    their text had been sent to a cloud.
+    """
+    name = (name or "none").lower()
+    if name == "none":
+        return "none"
+    if name == "local":
+        return "local"
+    if name == "anthropic":
+        return "anthropic" if anthropic_api_key else "local"
+    if name in ("openai", "google"):
+        return "local"
+    return "none"
+
+
 def get_provider(name: str, *, anthropic_api_key: str | None = None) -> AIProvider:
     """Resolve the configured provider name to an instance. Falls back to the
     free, local, no-network provider whenever a cloud provider is selected but
