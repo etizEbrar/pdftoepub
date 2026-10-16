@@ -171,6 +171,9 @@ final class ConversionFlowUITests: XCTestCase {
         // "On My iPhone" — identified by its icon so this doesn't depend on the
         // simulator's language.
         let onMyPhone = app.cells.containing(.image, identifier: "iphone").firstMatch
+        // The picker reopens wherever it was last, which may be inside a
+        // location already; a second tap on Browse returns to its top level.
+        if !onMyPhone.waitForExistence(timeout: 4) { browseTab.tap() }
         XCTAssertTrue(onMyPhone.waitForExistence(timeout: 10), "'On My iPhone' location not found")
         onMyPhone.tap()
 

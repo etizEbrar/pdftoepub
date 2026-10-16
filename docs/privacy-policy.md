@@ -60,45 +60,26 @@ We do not keep copies, backups or archives of your documents beyond this.
 
 ## Artificial intelligence
 
-Almost all of the conversion is performed by deterministic software running on
-the server: text extraction, optical character recognition, typography repair
-and EPUB generation. Scanned pages are read on your own device using Apple's
-Vision framework, so the server does not run text recognition on them. The PDF
-itself, scanned pages included, is still uploaded so the server can build your
+The conversion is performed by deterministic software. Scanned pages need text
+recognition: from version 1.0.1 the app does this on your own device with Apple's
+Vision framework, and version 1.0 had the conversion server do it. Either way the
+PDF itself, scanned pages included, is uploaded so the server can build your
 EPUB, and is deleted afterwards as described above.
 
-A small part of the work cannot be decided that way. Reconstructing a book
-means deciding what each fragment of it *is* — a chapter title, a caption, a
-footnote, a line of verse. On a typeset page the geometry usually settles
-that. On a scanned page it often does not, because the type sizes carry almost
-no signal. Measured on a real 168-page book, about **9% of fragments** fall
-below the confidence threshold our own software can resolve.
+**No third-party AI service receives any part of your document.** The service we
+operate does not send your text to Anthropic, OpenAI, Google or any other AI
+provider, and nothing you convert is used to train any AI or machine-learning
+system.
 
-**When structural review is enabled**, only those fragments are sent to
-Anthropic's Claude API to be classified. Specifically:
+You can check this in the app: open Settings and tap Test connection, and it
+reports that no AI provider is in use.
 
-- **What is sent:** the uncertain fragment and the lines immediately either
-  side of it, each capped at a few hundred characters.
-- **What is never sent:** the PDF itself, whole pages, images of your pages,
-  the complete document, your name, your email, or any identifier. There is no
-  account to attach anything to.
-- **What comes back:** a structural label and a heading level. The request
-  instructs the model never to rewrite, correct, translate, complete or
-  summarise any text, and nothing it returns can change the author's words.
-- **If the call fails:** our own answer stands and the conversion completes.
+If we ever offer AI review of a document's structure, it will be off until you
+turn it on in the app, the app will tell you exactly what would be sent before
+you do, and this policy will be updated before it is available.
 
-Anthropic does not train its models on data submitted through its API. We do
-not use your documents to train anything either.
-
-**The app always shows which provider the server is using.** Open Settings and
-tap Test connection: it reports `none` when no cloud review is in use, and
-`anthropic` when it is. That indicator is the authoritative answer for the
-service you are connected to at that moment.
-
-If you run the conversion server yourself, structural review is off unless you
-configure it, and the software requires no API key and no paid service to work.
-
-This policy is updated before any change to this behaviour takes effect.
+If you run the conversion server yourself, it uses no AI service unless you
+configure one.
 
 ## Who else receives your data
 

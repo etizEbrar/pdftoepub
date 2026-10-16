@@ -67,8 +67,9 @@
         Most converters pour a PDF's text into one long page and call it an
         ebook. This one rebuilds the book: it reads scans on your iPhone's
         Neural Engine, repairs the typography a PDF breaks, reconstructs the
-        chapter hierarchy, and calls on <strong>Claude</strong> for the handful
-        of structural decisions that genuinely cannot be settled by geometry.
+        chapter hierarchy, and is built to hand <strong>Claude</strong> the
+        handful of structural decisions that genuinely cannot be settled by
+        geometry.
       </p>
 
       <div class="hero__actions">
@@ -261,10 +262,11 @@
               Some calls cannot be made from geometry: on a scanned page, type
               size carries almost no signal, and a bold centred line may be a
               chapter title, a pull-quote or a caption. Only the fragments
-              scored below the confidence threshold are sent to Claude, and
-              only to be classified.
+              scored below the confidence threshold would be sent to Claude,
+              and only to be classified. This stage is built and tested but not
+              yet switched on; when it is, it will be an opt-in you control.
             </p>
-            <span class="steps__where">optional · Claude Haiku 4.5</span>
+            <span class="steps__where">opt-in · not yet enabled · Claude Haiku 4.5</span>
           </div>
         </li>
         <li>
@@ -294,6 +296,7 @@
           </span>
           <span class="badge">claude-haiku-4-5</span>
           <span class="badge">9.1% of a real book</span>
+          <span class="badge">Opt-in &middot; not yet enabled</span>
         </div>
 
         <h2 id="claude-head">
@@ -347,10 +350,13 @@
         <p style="margin-top:var(--space-lg);color:var(--ink-faint);font-size:0.88rem">
           Cost discipline is the design, not a limitation: at
           <strong>$0.027 a book</strong>, sending only what geometry cannot
-          settle is what makes a free converter viable. The app always reports
-          which provider the server is using — open Settings and tap Test
-          connection — and if you run the server yourself, structural review is
-          off until you configure it and needs no API key at all.
+          settle is what makes a free converter viable.
+          <strong>Structural review is opt-in and is not yet switched on for
+          the app's own server</strong>: today every conversion runs on the
+          deterministic engine alone. When it is offered, it will stay off
+          until you turn it on in the app, and the app will say exactly what
+          would be sent before you do. Open Settings and tap Test connection
+          to see what the server you are connected to reports.
         </p>
       </div>
     </div>
@@ -467,7 +473,7 @@
           <ul class="defects">
             <li><b>The PDF</b><span>To build your EPUB, then deleted as soon as you have it.</span></li>
             <li><b>Recognised words and boxes</b><span>Text and coordinates from on-device OCR, so the server never re-reads the scan.</span></li>
-            <li><b>Ambiguous fragments, if you enable review</b><span>The uncertain fragment and its immediate neighbours, to Claude, to be classified — not edited.</span></li>
+            <li><b>Nothing to any AI service</b><span>Structural review is not switched on. If it is offered, it will be off until you turn it on, and only an uncertain fragment and its neighbours would go to Claude, to be classified — never edited.</span></li>
           </ul>
         </article>
       </div>

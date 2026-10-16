@@ -167,18 +167,17 @@ Connect → Upload.
 
 ### Decisions only the account holder can make
 
-- **AI wording.** The App Store description says "No AI service is involved",
-  and App Privacy says no data is collected. Settings says the server "can ask
-  Claude to classify just that fragment", and the landing page lists
-  "Ambiguous fragments, if you enable review" — but there is no such switch in
-  the app. With `AI_PROVIDER=none` that is true but reads as a disclosure of
-  third-party sharing. Make the Settings text match the server you ship, and
-  before enabling Claude, update App Privacy and ask for consent in the app
-  (Guideline 5.1.2(i)).
-- **Server region.** `pdftoepub-backend.onrender.com` resolves through
-  `gcp-us-west1-1.origin.onrender.com`, while `render.yaml` and the privacy
-  policy say Frankfurt. Check the region in the Render dashboard; the policy
-  states it.
+- **AI wording — resolved for 1.0.1.** Settings, the privacy policy and the
+  landing page now describe the service as it ships: no third-party AI. The
+  structural-review disclosure is kept, unpublished, in
+  `docs/drafts/structural-review-disclosure.md`, with the three things that
+  must ship with it (an in-app opt-in, App Privacy answers, review notes) —
+  Guideline 5.1.2(i) requires explicit permission before data reaches a
+  third-party AI, and a server switch is not permission.
+- **Server region — checked, Frankfurt stands.** The hostname resolves through
+  `gcp-us-west1-1.origin.onrender.com`, but the origin answers Cloudflare's
+  Istanbul edge in 64–77 ms; any hop to Oregon adds at least 150 ms. The
+  origin name is Render's routing label, not the service's region.
 - **Review-time cold starts.** The free instance sleeps after 15 minutes.
   The review notes explain the wait; an always-on instance during review
   removes it.

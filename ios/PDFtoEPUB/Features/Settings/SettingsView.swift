@@ -74,7 +74,13 @@ struct SettingsView: View {
                     // privacy policy points readers at.
                     LabeledContent("Structural review", value: aiProviderDescription)
                 } footer: {
-                    Text("Your scan is read on this iPhone and the conversion runs on deterministic software. Where a fragment is too ambiguous to place — common on scanned pages — the server can ask Claude to classify just that fragment and its neighbours, never your document. Tap Test connection to see which provider this server is using.")
+                    // What the app's own server does today, not a capability it
+                    // has switched off. Describing a third-party AI flow the app
+                    // has no consent step for invites App Review Guideline
+                    // 5.1.2(i), which requires explicit permission before data
+                    // reaches a third-party AI; when structural review ships it
+                    // ships as an opt-in, with this copy (and the policy) updated.
+                    Text("Your scan is read on this iPhone, and the book is rebuilt on the conversion server by deterministic software. The app's own server uses no AI service. Tap Test connection to see what the server you're connected to reports.")
                 }
 
                 Section {

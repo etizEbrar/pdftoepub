@@ -59,46 +59,22 @@ footer{margin-top:3rem;color:var(--muted);font-size:.9rem;border-top:1px solid v
 <li>We do not use them for advertising or profiling.</li>
 </ul>
 <h2>Artificial intelligence</h2>
-<p>Almost all of the conversion is performed by deterministic software running on</p>
-<p>the server: text extraction, optical character recognition, typography repair</p>
-<p>and EPUB generation. Scanned pages are read on your own device using Apple&#x27;s</p>
-<p>Vision framework, so the server does not run text recognition on them. The PDF</p>
-<p>itself, scanned pages included, is still uploaded so the server can build your</p>
+<p>The conversion is performed by deterministic software. Scanned pages need text</p>
+<p>recognition: from version 1.0.1 the app does this on your own device with Apple&#x27;s</p>
+<p>Vision framework, and version 1.0 had the conversion server do it. Either way the</p>
+<p>PDF itself, scanned pages included, is uploaded so the server can build your</p>
 <p>EPUB, and is deleted afterwards as described above.</p>
-<p>A small part of the work cannot be decided that way. Reconstructing a book</p>
-<p>means deciding what each fragment of it *is* — a chapter title, a caption, a</p>
-<p>footnote, a line of verse. On a typeset page the geometry usually settles</p>
-<p>that. On a scanned page it often does not, because the type sizes carry almost</p>
-<p>no signal. Measured on a real 168-page book, about <strong>9% of fragments</strong> fall</p>
-<p>below the confidence threshold our own software can resolve.</p>
-<p><strong>When structural review is enabled</strong>, only those fragments are sent to</p>
-<p>Anthropic&#x27;s Claude API to be classified. Specifically:</p>
-<ul>
-<li><strong>What is sent:</strong> the uncertain fragment and the lines immediately either</li>
-</ul>
-<p>  side of it, each capped at a few hundred characters.</p>
-<ul>
-<li><strong>What is never sent:</strong> the PDF itself, whole pages, images of your pages,</li>
-</ul>
-<p>  the complete document, your name, your email, or any identifier. There is no</p>
-<p>  account to attach anything to.</p>
-<ul>
-<li><strong>What comes back:</strong> a structural label and a heading level. The request</li>
-</ul>
-<p>  instructs the model never to rewrite, correct, translate, complete or</p>
-<p>  summarise any text, and nothing it returns can change the author&#x27;s words.</p>
-<ul>
-<li><strong>If the call fails:</strong> our own answer stands and the conversion completes.</li>
-</ul>
-<p>Anthropic does not train its models on data submitted through its API. We do</p>
-<p>not use your documents to train anything either.</p>
-<p><strong>The app always shows which provider the server is using.</strong> Open Settings and</p>
-<p>tap Test connection: it reports <code>none</code> when no cloud review is in use, and</p>
-<p><code>anthropic</code> when it is. That indicator is the authoritative answer for the</p>
-<p>service you are connected to at that moment.</p>
-<p>If you run the conversion server yourself, structural review is off unless you</p>
-<p>configure it, and the software requires no API key and no paid service to work.</p>
-<p>This policy is updated before any change to this behaviour takes effect.</p>
+<p><strong>No third-party AI service receives any part of your document.</strong> The service we</p>
+<p>operate does not send your text to Anthropic, OpenAI, Google or any other AI</p>
+<p>provider, and nothing you convert is used to train any AI or machine-learning</p>
+<p>system.</p>
+<p>You can check this in the app: open Settings and tap Test connection, and it</p>
+<p>reports that no AI provider is in use.</p>
+<p>If we ever offer AI review of a document&#x27;s structure, it will be off until you</p>
+<p>turn it on in the app, the app will tell you exactly what would be sent before</p>
+<p>you do, and this policy will be updated before it is available.</p>
+<p>If you run the conversion server yourself, it uses no AI service unless you</p>
+<p>configure one.</p>
 <h2>Who else receives your data</h2>
 <p><strong>Our hosting provider</strong>, which runs the conversion server and necessarily</p>
 <p>processes the traffic to it: Render (Render Services, Inc.), Frankfurt, Germany (EU).</p>

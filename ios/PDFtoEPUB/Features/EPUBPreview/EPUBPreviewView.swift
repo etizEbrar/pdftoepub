@@ -135,12 +135,58 @@ private struct EPUBWebView: UIViewRepresentable {
     let document: EPUBDocument
     @Binding var chapterIndex: Int
 
+    /// Typography the source stylesheet does not set, a dark mode the
+    /// reader's system setting decides, and -- the part that was missing --
+    /// a viewport. The chapters declare none, so WebKit laid each one out at
+    /// its 980-point desktop default and shrank it onto the phone: the book
+    /// opened at roughly six-point type. Injected rather than written into the
+    /// EPUB, so the exported file stays exactly the book the backend produced.
+    ///
+    /// A user script in the app's own content world, not `evaluateJavaScript`
+    /// after load: the page's JavaScript is disabled, which an app-world user
+    /// script is not subject to, and running at document end means the first
+    /// paint is already at the right size rather than a reflow after it.
+    static let readerScript = """
+    (function () {
+      var head = document.head || document.documentElement;
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, initial-scale=1';
+      head.appendChild(meta);
+      var s = document.createElement('style');
+      s.textContent = `
+        :root { color-scheme: light dark; }
+        body {
+          font: -apple-system-body;
+          line-height: 1.6;
+          margin: 0 auto;
+          padding: 1.2em 1.1em 3em;
+          max-width: 34em;
+          -webkit-text-size-adjust: 100%;
+        }
+        img { max-width: 100%; height: auto; }
+      `;
+      head.appendChild(s);
+    })();
+    """
+
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         // The book is local content and has no reason to reach the network.
         // Nothing in a converted EPUB should be loading remote resources, and
         // if a source document tries, it does not get to.
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+
+        // Reader typography, installed as the app's own script so it runs
+        // with the book's JavaScript switched off. See `readerScript`.
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.readerScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true,
+                in: .defaultClient
+            )
+        )
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -178,28 +224,6 @@ private struct EPUBWebView: UIViewRepresentable {
         init(document: EPUBDocument) { self.document = document }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // Typography the source stylesheet does not set, and a dark mode
-            // the reader's system setting decides. Injected rather than
-            // written into the EPUB, so the exported file stays exactly the
-            // book the backend produced.
-            let css = """
-            var s = document.createElement('style');
-            s.textContent = `
-              :root { color-scheme: light dark; }
-              body {
-                font: -apple-system-body;
-                line-height: 1.6;
-                margin: 0 auto;
-                padding: 1.2em 1.1em 3em;
-                max-width: 34em;
-                -webkit-text-size-adjust: 100%;
-              }
-              img { max-width: 100%; height: auto; }
-            `;
-            document.head.appendChild(s);
-            """
-            webView.evaluateJavaScript(css)
-
             if let url = webView.url, let index = document.chapterIndex(of: url) {
                 shownChapter = index
                 onChapterShown?(index)

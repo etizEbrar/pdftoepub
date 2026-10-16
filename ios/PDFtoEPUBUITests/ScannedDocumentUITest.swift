@@ -34,9 +34,13 @@ final class ScannedDocumentUITest: XCTestCase {
 
         let tabBar = app.tabBars["DOC.browsingModeTabBar"]
         try XCTSkipUnless(tabBar.waitForExistence(timeout: 15), "document picker unavailable")
-        tabBar.buttons.element(boundBy: 2).tap()
+        let browseTab = tabBar.buttons.element(boundBy: 2)
+        browseTab.tap()
 
         let onMyPhone = app.cells.containing(.image, identifier: "iphone").firstMatch
+        // The picker reopens wherever it was last; a second tap on Browse
+        // returns to its top level.
+        if !onMyPhone.waitForExistence(timeout: 4) { browseTab.tap() }
         try XCTSkipUnless(onMyPhone.waitForExistence(timeout: 10), "location unavailable")
         onMyPhone.tap()
 
