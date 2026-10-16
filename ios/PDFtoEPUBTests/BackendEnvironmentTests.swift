@@ -48,6 +48,48 @@ final class BackendEnvironmentTests: XCTestCase {
         }
     }
 
+    // MARK: - Where an address points
+
+    func testLoopbackIsTheDeviceItself() {
+        let loopback = [
+            "http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000",
+            "http://0.0.0.0:8000"
+        ]
+        for address in loopback {
+            XCTAssertTrue(BackendEnvironment.isLoopback(URL(string: address)!), address)
+        }
+        let elsewhere = [
+            "http://192.168.1.10:8000", "http://mac-mini.local:8000",
+            "https://convert.example.com"
+        ]
+        for address in elsewhere {
+            XCTAssertFalse(BackendEnvironment.isLoopback(URL(string: address)!), address)
+        }
+    }
+
+    func testEachKindOfAddressIsRecognised() {
+        let builtIn = "https://pdftoepub-backend.onrender.com"
+        func kind(_ address: String) -> BackendAddressKind {
+            BackendEnvironment.kind(of: URL(string: address)!, builtIn: builtIn)
+        }
+        XCTAssertEqual(kind("https://pdftoepub-backend.onrender.com"), .builtIn)
+        XCTAssertEqual(kind("https://PDFtoEPUB-backend.onrender.com/"), .builtIn)
+        XCTAssertEqual(kind("http://localhost:8000"), .loopback)
+        XCTAssertEqual(kind("http://192.168.1.10:8000"), .localNetwork)
+        XCTAssertEqual(kind("http://mac-mini.local:8000"), .localNetwork)
+        XCTAssertEqual(kind("https://gone.trycloudflare.com"), .other)
+    }
+
+    /// A debug build's own address is localhost. On a phone what matters is
+    /// what localhost means there, not that it is the default.
+    func testLoopbackWinsEvenWhenItIsTheBuiltInAddress() {
+        let localhost = "http://localhost:8000"
+        XCTAssertEqual(
+            BackendEnvironment.kind(of: URL(string: localhost)!, builtIn: localhost),
+            .loopback
+        )
+    }
+
     // MARK: - Validation
 
     func testEmptyAddressReportsSetupRatherThanError() {
@@ -298,4 +340,87 @@ final class StaleAddressRecoveryTests: XCTestCase {
         settings.baseURLString = "  \(builtIn)\n"
         XCTAssertFalse(settings.isOverridingBuiltInAddress)
     }
+}
+
+/// Keeping one build's address from outliving it.
+///
+/// A debug build left localhost on disk, because putting the default back — the
+/// reset, and every test's cleanup — stored it as if a user had typed it. An App
+/// Store build installed over it would read that back, prefer it to its own
+/// server, and fail every conversion with "Can't reach the server"; 1.0 also
+/// hid the field that could have changed it.
+final class DevelopmentAddressResidueTests: XCTestCase {
+
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "backend.baseURL")
+    }
+
+    override func tearDown() {
+        defaults.removeObject(forKey: "backend.baseURL")
+        super.tearDown()
+    }
+
+    /// The cleanup every settings test does.
+    func testPuttingTheBuiltInAddressBackStoresNothing() throws {
+        _ = try XCTUnwrap(BackendEnvironment.defaultBaseURLString, "this build has no built-in address")
+        let settings = AppSettings()
+        let original = settings.baseURLString
+        settings.baseURLString = "https://convert.example.com"
+        settings.baseURLString = original
+
+        XCTAssertNil(
+            defaults.object(forKey: "backend.baseURL"),
+            "the build's own address was stored as though the user had chosen it"
+        )
+    }
+
+    func testResettingStoresNothing() throws {
+        _ = try XCTUnwrap(BackendEnvironment.defaultBaseURLString, "this build has no built-in address")
+        let settings = AppSettings()
+        settings.baseURLString = "https://gone.trycloudflare.com"
+        settings.resetToBuiltInAddress()
+
+        XCTAssertNil(defaults.object(forKey: "backend.baseURL"))
+    }
+
+    func testAnAddressTheUserChoseIsStillRemembered() {
+        let settings = AppSettings()
+        settings.baseURLString = "http://192.168.1.10:8000"
+
+        XCTAssertEqual(AppSettings().baseURLString, "http://192.168.1.10:8000")
+    }
+
+    func testALoopbackAddressIsOnlyUsableInTheSimulator() {
+        for address in ["http://localhost:8000", "http://127.0.0.1:8000", "http://0.0.0.0:8000"] {
+            XCTAssertFalse(AppSettings.isUsableHere(address, inSimulator: false), address)
+            XCTAssertTrue(AppSettings.isUsableHere(address, inSimulator: true), address)
+        }
+    }
+
+    /// A LAN server or a tunnel may be exactly what the user meant, so those are
+    /// kept; the error screen names them and offers the way back instead.
+    func testOtherStoredAddressesAreKept() {
+        let kept = [
+            "http://192.168.1.10:8000", "https://x.trycloudflare.com",
+            "https://convert.example.com"
+        ]
+        for address in kept {
+            XCTAssertTrue(AppSettings.isUsableHere(address, inSimulator: false), address)
+        }
+    }
+
+    #if !targetEnvironment(simulator)
+    /// An install that already carries localhost recovers on its next launch.
+    func testAStoredLoopbackAddressIsDroppedOnAPhone() {
+        defaults.set("http://localhost:8000", forKey: "backend.baseURL")
+        let settings = AppSettings()
+
+        XCTAssertEqual(settings.baseURLString, BackendEnvironment.defaultBaseURLString ?? "")
+        XCTAssertNil(defaults.object(forKey: "backend.baseURL"), "the residue was left on disk")
+    }
+    #endif
 }

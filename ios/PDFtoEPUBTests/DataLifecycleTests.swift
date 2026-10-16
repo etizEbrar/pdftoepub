@@ -111,6 +111,42 @@ final class DataLifecycleTests: XCTestCase {
             "the EPUB must stay inside the app's container, was \(epubURL.path)"
         )
     }
+
+    /// "Try again" used to drop the user on the empty home screen: the failed
+    /// phase carries no document, so there was nothing to retry. "Use the
+    /// app's own server" retries through the same path and did the same.
+    func testTryAgainConvertsTheSameBookAgain() async throws {
+        let pdf = try writeTemporaryPDF()
+        defer { try? FileManager.default.removeItem(at: pdf) }
+
+        let epub = FileManager.default.temporaryDirectory
+            .appendingPathComponent("retry-\(UUID().uuidString).epub")
+        try Data("epub".utf8).write(to: epub)
+        defer { try? FileManager.default.removeItem(at: epub) }
+
+        let client = completedClient(returning: epub)
+        client.capabilitiesError = APIError.serverUnavailable
+        let settings = AppSettings()
+        let original = settings.baseURLString
+        defer { settings.baseURLString = original }
+        settings.baseURLString = "https://convert.example.com"
+
+        let viewModel = ConversionViewModel(settings: settings, makeClient: { _ in client })
+        viewModel.selectDocument(at: pdf)
+        viewModel.startConversion()
+        for _ in 0..<200 {
+            if case .failed = viewModel.phase { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard case .failed = viewModel.phase else {
+            return XCTFail("expected the unreachable server to fail the conversion")
+        }
+
+        client.capabilitiesError = nil
+        viewModel.retry()
+        try await waitForCompletion(viewModel)
+        XCTAssertEqual(client.capabilitiesCallCount, 2, "the retry never reached the server")
+    }
 }
 
 /// The finished book is named after the book, not after the PDF it came from.

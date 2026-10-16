@@ -39,7 +39,8 @@ cloud AI service, and no part of your book is sent to an AI provider.
 
 ## Setting up the conversion server
 
-This app converts using a server you point it at.
+The app converts on its own server, so there is nothing to set up. If you run the
+conversion server yourself, you can point the app at it instead:
 
 1. Open **Settings** in the app.
 2. Enter the server's address.
@@ -59,11 +60,15 @@ documents unencrypted across the internet.
 You have not entered an address yet. Open Settings and add one.
 
 **"No server at that address"**
-The address could not be resolved. Check it for a typo.
+The address you entered could not be resolved. Check it for a typo.
 
 **"Can't reach the server" / "Nothing listening on that port"**
-The address is right but nothing answered. Check the server is running, that the
-port is correct, and that both devices are on the same network.
+If you have not changed the server address, the app is using its own server and
+your iPhone could not connect to it. Check your internet connection and try
+again; if it keeps failing, try another network, or turn off any VPN or content
+blocker. If you entered your own server's address, check that the server is
+running, that the port is correct, and that both devices are on the same
+network — or tap **Use the app's own server** in Settings to switch back.
 
 **"No network connection"**
 The device itself is offline. Check Wi-Fi or mobile data.

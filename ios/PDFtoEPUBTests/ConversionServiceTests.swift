@@ -120,6 +120,34 @@ final class ConversionServiceTests: XCTestCase {
         XCTAssertFalse(messages.contains(where: \.isEmpty))
     }
 
+    /// App Store users were told "localhost" is the phone itself when the app's
+    /// own server could not be reached — a server they had never configured.
+    func testTheAppsOwnServerIsNeverExplainedAsLocalhost() {
+        XCTAssertFalse(APIError.unreachableMessage(for: .builtIn).contains("localhost"))
+        XCTAssertFalse(APIError.serverUnavailable.userMessage.contains("localhost"))
+    }
+
+    /// The next step differs by where the app was looking, so the words do too.
+    func testEachKindOfAddressGetsItsOwnAdvice() {
+        let messages = [
+            APIError.unreachableMessage(for: .builtIn),
+            APIError.unreachableMessage(for: .loopback, inSimulator: false),
+            APIError.unreachableMessage(for: .localNetwork),
+            APIError.unreachableMessage(for: .other)
+        ]
+        XCTAssertEqual(Set(messages).count, messages.count)
+        XCTAssertFalse(messages.contains(where: \.isEmpty))
+        XCTAssertTrue(messages[1].contains("localhost"))
+    }
+
+    /// In the Simulator loopback is the Mac, where "the phone itself" is wrong.
+    func testLoopbackInTheSimulatorIsJustAServerThatIsNotRunning() {
+        XCTAssertEqual(
+            APIError.unreachableMessage(for: .loopback, inSimulator: true),
+            APIError.unreachableMessage(for: .other)
+        )
+    }
+
     func testStartPassesModeThroughToTheClient() async throws {
         let client = StubAPIClient()
         let service = ConversionService(client: client)
@@ -142,6 +170,41 @@ final class ConversionServiceTests: XCTestCase {
 private actor Updates {
     private(set) var statuses: [JobStage] = []
     func append(_ status: JobStage) { statuses.append(status) }
+}
+
+/// What the error screen says when nothing answers, and whether it lets the
+/// user try again.
+@MainActor
+final class UnreachableServerFailureTests: XCTestCase {
+
+    func testTheAppsOwnServerBeingUnreachableIsRetryable() async {
+        let failure = ConversionViewModel.failure(from: .serverUnavailable, addressKind: .builtIn)
+        XCTAssertEqual(failure.code, "server_unavailable")
+        XCTAssertTrue(failure.isRetryable)
+        XCTAssertEqual(failure.message, APIError.unreachableMessage(for: .builtIn))
+    }
+
+    /// A failed lookup of a server the user never typed is not their typo, and
+    /// used to leave them on a screen with no retry.
+    func testAFailedLookupOfTheAppsOwnServerIsNotBlamedOnATypo() async {
+        let failure = ConversionViewModel.failure(from: .hostNotFound, addressKind: .builtIn)
+        XCTAssertEqual(failure.code, "server_unavailable")
+        XCTAssertTrue(failure.isRetryable)
+        XCTAssertFalse(failure.message.contains("typo"))
+    }
+
+    /// For an address the user typed, a typo is still the likeliest cause.
+    func testAFailedLookupOfATypedAddressStillPointsAtTheAddress() async {
+        let failure = ConversionViewModel.failure(from: .hostNotFound, addressKind: .other)
+        XCTAssertEqual(failure.code, "host_not_found")
+        XCTAssertEqual(failure.message, APIError.hostNotFound.userMessage)
+    }
+
+    func testAServerOnTheLocalNetworkGetsLocalNetworkAdvice() async {
+        let failure = ConversionViewModel.failure(from: .serverUnavailable, addressKind: .localNetwork)
+        XCTAssertEqual(failure.code, "server_unavailable")
+        XCTAssertEqual(failure.message, APIError.unreachableMessage(for: .localNetwork))
+    }
 }
 
 // MARK: - Reaching the server at all

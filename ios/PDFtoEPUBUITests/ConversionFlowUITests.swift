@@ -11,6 +11,31 @@ final class ConversionFlowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Set once this run has typed an address into Settings.
+    private var changedTheAppsAddress = false
+
+    /// Puts the app back on its own server after a run that pointed it here.
+    ///
+    /// What `configureBackendIfNeeded` types is persisted like anything a user
+    /// types, so it outlived the test: an App Store build later installed over
+    /// this one would read the Mac's LAN address back and fail every
+    /// conversion with "Can't reach the server" whenever that Mac's server was
+    /// not running. The build's own address stores nothing, so resetting to it
+    /// leaves nothing behind.
+    override func tearDown() {
+        if changedTheAppsAddress {
+            let app = XCUIApplication()
+            app.launch()
+            if app.buttons["Settings"].waitForExistence(timeout: 10) {
+                app.buttons["Settings"].tap()
+                let reset = app.buttons["settings.resetAddress"]
+                if reset.waitForExistence(timeout: 5) { reset.tap() }
+                if app.buttons["Done"].waitForExistence(timeout: 5) { app.buttons["Done"].tap() }
+            }
+        }
+        super.tearDown()
+    }
+
     /// Where the backend is, for this run.
     ///
     /// Defaults to localhost so the simulator suite behaves as before. Set
@@ -86,6 +111,7 @@ final class ConversionFlowUITests: XCTestCase {
             }
         }
         field.typeText(backendURLString)
+        changedTheAppsAddress = true
 
         app.buttons["settings.testConnection"].tap()
         XCTAssertTrue(

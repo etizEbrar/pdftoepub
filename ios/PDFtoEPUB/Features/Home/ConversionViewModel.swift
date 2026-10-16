@@ -31,6 +31,11 @@ final class ConversionViewModel {
     private let makeClient: (URL) -> APIClient
     private var currentJobID: String?
     private var conversionTask: Task<Void, Never>?
+    /// The book the last conversion was for. A failed phase carries no
+    /// document, so without this "Try again" — and "Use the app's own server",
+    /// which retries through it — had nothing to retry: both dropped the user
+    /// on the empty home screen to pick the file all over again.
+    private var lastAttempted: SelectedDocument?
 
     init(
         settings: AppSettings,
@@ -58,6 +63,7 @@ final class ConversionViewModel {
     // MARK: - Document selection
 
     func selectDocument(at url: URL) {
+        lastAttempted = nil
         do {
             let document = try PDFInspector.inspect(url: url)
             phase = .documentSelected(document)
@@ -77,6 +83,7 @@ final class ConversionViewModel {
         conversionTask?.cancel()
         conversionTask = nil
         currentJobID = nil
+        lastAttempted = nil
         progress = nil
         phase = .idle
     }
@@ -85,6 +92,7 @@ final class ConversionViewModel {
 
     func startConversion() {
         guard let document = selectedDocument else { return }
+        lastAttempted = document
         // Separate "you have not set this up yet" from "what you set up is
         // wrong" — the first is a normal first run, the second is a mistake to
         // correct. Both send the user to Settings rather than offering a retry
@@ -194,7 +202,9 @@ final class ConversionViewModel {
             } catch let error as APIError {
                 await MainActor.run {
                     self.localOCR = nil
-                    self.phase = .failed(Self.failure(from: error))
+                    self.phase = .failed(
+                        Self.failure(from: error, addressKind: BackendEnvironment.kind(of: baseURL))
+                    )
                 }
             } catch {
                 await MainActor.run {
@@ -223,12 +233,12 @@ final class ConversionViewModel {
     }
 
     func retry() {
-        if let document = selectedDocument {
-            phase = .documentSelected(document)
-            startConversion()
-        } else {
+        guard let document = selectedDocument ?? lastAttempted else {
             phase = .idle
+            return
         }
+        phase = .documentSelected(document)
+        startConversion()
     }
 
     /// Backend error codes that describe something about *this PDF* can't be
@@ -257,21 +267,34 @@ final class ConversionViewModel {
         return "\(stem).epub"
     }
 
-    private static func failure(from error: APIError) -> ConversionFailure {
+    /// What the error screen shows for `error`, given where the app was looking.
+    ///
+    /// For the app's own server a failed name lookup is the same problem as a
+    /// refused connection — something between the phone and a server the user
+    /// never typed — not a typo to correct. It used to say "check the address
+    /// in Settings for a typo" and offer no retry, which left the user on a
+    /// screen whose only button led to nothing they could change.
+    static func failure(from error: APIError, addressKind kind: BackendAddressKind) -> ConversionFailure {
         let code: String
+        var message = error.userMessage
         switch error {
         case .server(let serverCode, _): code = serverCode
         case .invalidURL: code = "invalid_url"
         case .notConfigured: code = "backend_not_configured"
+        case .hostNotFound where kind == .builtIn:
+            code = "server_unavailable"
+            message = APIError.unreachableMessage(for: kind)
         case .hostNotFound: code = "host_not_found"
         case .offline: code = "offline"
-        case .serverUnavailable: code = "server_unavailable"
+        case .serverUnavailable:
+            code = "server_unavailable"
+            message = APIError.unreachableMessage(for: kind)
         case .timedOut: code = "timeout"
         default: code = "network"
         }
         return ConversionFailure(
             code: code,
-            message: error.userMessage,
+            message: message,
             isRetryable: !nonRetryableCodes.contains(code)
         )
     }

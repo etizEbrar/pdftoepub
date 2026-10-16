@@ -12,7 +12,7 @@ final class AppSettings {
     /// Empty when the build has no backend configured and the user has not yet
     /// supplied one, which the UI treats as "needs setup" rather than an error.
     var baseURLString: String {
-        didSet { UserDefaults.standard.set(baseURLString, forKey: Keys.baseURL) }
+        didSet { persistBaseURL() }
     }
 
     var preferredMode: ConversionMode {
@@ -21,9 +21,48 @@ final class AppSettings {
 
     init() {
         let stored = UserDefaults.standard.string(forKey: Keys.baseURL)
-        self.baseURLString = stored ?? BackendEnvironment.defaultBaseURLString ?? ""
+        let usable = stored.flatMap { Self.isUsableHere($0) ? $0 : nil }
+        if stored != nil, usable == nil {
+            UserDefaults.standard.removeObject(forKey: Keys.baseURL)
+        }
+        self.baseURLString = usable ?? BackendEnvironment.defaultBaseURLString ?? ""
         let storedMode = UserDefaults.standard.string(forKey: Keys.preferredMode) ?? ""
         self.preferredMode = ConversionMode(rawValue: storedMode) ?? .maximumAccuracy
+    }
+
+    /// Stores the address only when it differs from the build's own.
+    ///
+    /// The default used to be written back like anything else — by "Use the
+    /// app's own server", and by every test that put the original address back
+    /// when it finished. In a debug build that default is localhost, so a debug
+    /// build left localhost on disk as though the user had typed it. An App
+    /// Store build installed over it would read that back and prefer it to its
+    /// own server, failing every conversion with "Can't reach the server" — and
+    /// 1.0, whose Settings had no address field, left no way to change it.
+    /// Storing nothing for the default means each build brings its own.
+    private func persistBaseURL() {
+        let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let builtIn = BackendEnvironment.defaultBaseURLString, trimmed == builtIn {
+            UserDefaults.standard.removeObject(forKey: Keys.baseURL)
+        } else {
+            UserDefaults.standard.set(baseURLString, forKey: Keys.baseURL)
+        }
+    }
+
+    /// Whether a stored address can work where the app is running.
+    ///
+    /// On a phone, loopback is the phone itself, where no conversion server can
+    /// run, so a stored one can only be left over from a development build (see
+    /// `persistBaseURL`). Dropping it lets installs that already carry one
+    /// recover without anyone having to find the cause.
+    static func isUsableHere(
+        _ address: String,
+        inSimulator: Bool = BackendEnvironment.isRunningInSimulator
+    ) -> Bool {
+        guard !inSimulator,
+              let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return true }
+        return !BackendEnvironment.isLoopback(url)
     }
 
     var baseURL: URL? {

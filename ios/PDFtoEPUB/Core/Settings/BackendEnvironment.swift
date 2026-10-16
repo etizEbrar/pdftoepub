@@ -74,7 +74,7 @@ enum BackendEnvironment {
     /// Loopback and RFC 1918 hosts, which cannot work for a general audience.
     static func isPrivateAddress(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return true }
+        if isLoopback(url) { return true }
         if host.hasSuffix(".local") { return true }
         if host.hasPrefix("192.168.") || host.hasPrefix("10.") { return true }
         // 172.16.0.0 – 172.31.255.255
@@ -85,6 +85,43 @@ enum BackendEnvironment {
             }
         }
         return false
+    }
+
+    /// Addresses that mean "this device". On an iPhone that is the phone itself,
+    /// where no conversion server can run; only the Simulator, which shares the
+    /// Mac's network, reaches a server through one.
+    ///
+    /// 0.0.0.0 is here because it is what the development server prints when it
+    /// starts, so it is the address most likely to be pasted from a terminal.
+    static func isLoopback(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "localhost" || host == "::1" || host == "0.0.0.0"
+            || host.hasPrefix("127.")
+    }
+
+    static var isRunningInSimulator: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Where `url` points, which decides what to say when nothing answers there.
+    ///
+    /// Loopback is checked first: in a debug build it is also the built-in
+    /// address, and on a phone the useful thing to say is what it means there.
+    static func kind(
+        of url: URL, builtIn: String? = defaultBaseURLString
+    ) -> BackendAddressKind {
+        if isLoopback(url) { return .loopback }
+        if let host = url.host?.lowercased(),
+           let builtIn = builtIn.flatMap({ URL(string: $0) }),
+           host == builtIn.host?.lowercased() {
+            return .builtIn
+        }
+        if isPrivateAddress(url) { return .localNetwork }
+        return .other
     }
 
     /// Whether a user-entered address is usable in this build.
@@ -109,6 +146,17 @@ enum BackendEnvironment {
         if scheme == "http", !isPrivateAddress(url) { return .insecureScheme }
         return nil
     }
+}
+
+enum BackendAddressKind: Equatable {
+    /// The server this build ships with.
+    case builtIn
+    /// This device itself: localhost, 127.0.0.1, ::1.
+    case loopback
+    /// A machine on the user's own network.
+    case localNetwork
+    /// Any other server the user has pointed the app at.
+    case other
 }
 
 enum BackendAddressIssue: Equatable {

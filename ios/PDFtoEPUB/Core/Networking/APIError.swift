@@ -8,15 +8,43 @@ struct APIErrorResponse: Codable {
 }
 
 enum APIError: LocalizedError, Equatable {
-    /// The overwhelmingly common cause of a failed connection is that the app is
-    /// pointed at "localhost" while running on a physical device, where that
-    /// means the phone itself rather than the computer running the server. Say
-    /// so, instead of blaming the user's internet.
-    static let unreachableBackendMessage = """
-        Couldn't reach the conversion server. If you're running it on your \
-        computer, open Settings and enter that computer's address on your \
-        network — on a real iPhone, "localhost" points at the phone itself.
-        """
+    /// What to say when nothing answered, which depends on where the app looked.
+    ///
+    /// This was one message, written when the only server was one the user ran
+    /// on their own computer, so it explained that "localhost" is the phone
+    /// itself. Once the app shipped with a server of its own, that became the
+    /// explanation App Store users got for a server they never configured.
+    static func unreachableMessage(
+        for kind: BackendAddressKind,
+        inSimulator: Bool = BackendEnvironment.isRunningInSimulator
+    ) -> String {
+        switch kind {
+        case .builtIn:
+            return """
+                Couldn't connect to the conversion server. Check your internet \
+                connection and try again. If it keeps failing, try another \
+                network or turn off any VPN or content blocker.
+                """
+        case .loopback where !inSimulator:
+            return """
+                On an iPhone, "localhost" means the phone itself, not your \
+                computer. To use a server running on your computer, enter the \
+                computer's address on your network instead.
+                """
+        case .localNetwork:
+            return """
+                Couldn't reach the server on your network. Make sure it's \
+                running and that this iPhone is on the same Wi-Fi.
+                """
+        case .loopback, .other:
+            // In the Simulator loopback is the Mac, so this is simply a server
+            // that isn't running.
+            return """
+                Nothing answered at that address. Make sure the conversion \
+                server is running, then try again.
+                """
+        }
+    }
 
     case invalidURL
     /// No backend address has been configured yet.
@@ -56,7 +84,9 @@ enum APIError: LocalizedError, Equatable {
                 Settings for a typo.
                 """
         case .serverUnavailable:
-            return APIError.unreachableBackendMessage
+            // Without an address to go on, assume the app's own server, which
+            // is what nearly everyone is using.
+            return APIError.unreachableMessage(for: .builtIn)
         case .timedOut:
             return "The server took too long to respond. Your original PDF was not modified."
         case .server(_, let message):

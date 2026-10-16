@@ -81,10 +81,13 @@ struct ConversionErrorView: View {
                         Button("Open Settings", action: onOpenSettings)
                             .buttonStyle(PrimaryButtonStyle())
                     }
-                    if failure.isRetryable {
-                        Button("Try again", action: onRetry)
-                            .buttonStyle(SecondaryButtonStyle())
-                    }
+                    // Offered whether or not the failure is retryable as it
+                    // stands: these are fixed in Settings, and trying again is
+                    // what comes after. Without it, an unset or mistyped address
+                    // left one button, and closing Settings came back to this
+                    // screen with no way forward short of force-quitting.
+                    Button("Try again", action: onRetry)
+                        .buttonStyle(SecondaryButtonStyle())
                 } else {
                     if failure.isRetryable {
                         Button("Try again", action: onRetry)
