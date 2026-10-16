@@ -76,11 +76,9 @@ rather run the conversion server yourself, the Support page explains how.
 ## What's New in This Version (1.0.1)
 
 ```
-• Read the whole book in the app: Preview now moves chapter by chapter.
-• Scanned books are read on your iPhone, so long scans finish instead of
-  timing out.
-• Clearer messages when the server can't be reached, with Try again that
-  really tries again.
+• Read the whole book in the app: Preview now moves chapter by chapter, at a readable size.
+• Scanned books are read on your iPhone, so long scans finish instead of timing out.
+• Clearer messages when the server can't be reached, with Try again that really tries again.
 • A book over the size or page limit is caught before it is uploaded.
 • No more endless "Waking the conversion server" wait.
 ```
@@ -125,9 +123,10 @@ owner name and support email.
 
 ## Review notes
 
-Written for build 1.0.1 (8). Attach a sample PDF under App Review Information →
-Attachment before submitting — the app does not ship one, and the 1.0 notes
-wrongly said it did.
+Submitted with build 1.0.1 (8) on 2026-10-17, with `Sample-Book.pdf` (the
+generated `tests/fixtures/corpus/turkish_novel.pdf`) attached under App Review
+Information. One line per bullet in What's New: the store shows line breaks as
+typed.
 
 ```
 This app converts PDFs into EPUB ebooks using a hosted server. No account or
