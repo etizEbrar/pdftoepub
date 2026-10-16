@@ -23,13 +23,17 @@ struct ConversionProgressView: View {
     private static let explainWaitAfter = Duration.seconds(6)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.loose) {
-            header
-            stageChecklist
-            Spacer()
+        // Scrolls so the stage list is never clipped in landscape or at large
+        // text sizes; Cancel stays pinned below it either way.
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.loose) {
+                header
+                stageChecklist
+            }
+            .padding(Theme.Spacing.regular)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(Theme.Spacing.regular)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .scrollBounceBehavior(.basedOnSize)
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom) {
             Button("Cancel", action: onCancel)

@@ -148,7 +148,7 @@ final class LiveAPIClient: APIClient {
         }
     }
 
-    private static func mapTransportError(_ error: Error) -> APIError {
+    static func mapTransportError(_ error: Error) -> APIError {
         if error is CancellationError { return .cancelled }
         let nsError = error as NSError
         guard nsError.domain == NSURLErrorDomain else { return .decoding }
@@ -156,9 +156,11 @@ final class LiveAPIClient: APIClient {
         // Kept apart because the fix differs: reconnect, fix the address, or
         // start the server. Collapsing them into one "offline" message sends
         // people to check Wi-Fi when their server simply isn't running.
-        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost,
-             NSURLErrorInternationalRoamingOff, NSURLErrorDataNotAllowed:
+        case NSURLErrorNotConnectedToInternet, NSURLErrorInternationalRoamingOff,
+             NSURLErrorDataNotAllowed:
             return .offline
+        case NSURLErrorNetworkConnectionLost:
+            return .connectionLost
         case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
             return .hostNotFound
         case NSURLErrorCannotConnectToHost, NSURLErrorSecureConnectionFailed,

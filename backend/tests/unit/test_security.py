@@ -119,6 +119,24 @@ class TestErrorResponses:
         assert "Traceback" not in r.text
         assert "File \"" not in r.text
 
+    def test_messages_never_ask_the_reader_to_reconfigure_the_server(self):
+        """The app shows these verbatim to people who have never seen the server.
+
+        ocr_too_slow told App Store users to "raise the server's conversion
+        time limit". An operator's remedy belongs in the logs and the docs.
+        """
+        from app.core import errors
+
+        classes = [
+            obj for obj in vars(errors).values()
+            if isinstance(obj, type) and issubclass(obj, errors.ConversionError)
+        ]
+        assert len(classes) > 5
+        for cls in classes:
+            message = cls.user_message.lower()
+            for jargon in ("server's", "time limit", "faster machine", "_mb", "_seconds", "env"):
+                assert jargon not in message, f"{cls.__name__}: {cls.user_message!r}"
+
 
 class TestDownloadFilename:
     def test_header_injection_via_filename_is_neutralised(self):

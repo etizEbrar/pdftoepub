@@ -63,7 +63,9 @@ We do not keep copies, backups or archives of your documents beyond this.
 Almost all of the conversion is performed by deterministic software running on
 the server: text extraction, optical character recognition, typography repair
 and EPUB generation. Scanned pages are read on your own device using Apple's
-Vision framework, and the page images never leave your phone.
+Vision framework, so the server does not run text recognition on them. The PDF
+itself, scanned pages included, is still uploaded so the server can build your
+EPUB, and is deleted afterwards as described above.
 
 A small part of the work cannot be decided that way. Reconstructing a book
 means deciding what each fragment of it *is* — a chapter title, a caption, a

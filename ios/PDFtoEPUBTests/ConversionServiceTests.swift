@@ -114,7 +114,7 @@ final class ConversionServiceTests: XCTestCase {
     func testTransportErrorsHaveDistinctMessages() {
         let messages = [
             APIError.notConfigured, .offline, .hostNotFound,
-            .serverUnavailable, .timedOut, .invalidURL
+            .serverUnavailable, .timedOut, .invalidURL, .connectionLost
         ].map(\.userMessage)
         XCTAssertEqual(Set(messages).count, messages.count)
         XCTAssertFalse(messages.contains(where: \.isEmpty))
@@ -138,6 +138,57 @@ final class ConversionServiceTests: XCTestCase {
         XCTAssertEqual(Set(messages).count, messages.count)
         XCTAssertFalse(messages.contains(where: \.isEmpty))
         XCTAssertTrue(messages[1].contains("localhost"))
+    }
+
+    /// A connection the server dropped part-way was reported as "This device
+    /// isn't connected to a network", sending people to check a Wi-Fi that was
+    /// working. It is still retried while polling.
+    func testADroppedConnectionIsNotReportedAsOffline() {
+        XCTAssertEqual(LiveAPIClient.mapTransportError(URLError(.networkConnectionLost)), .connectionLost)
+        XCTAssertEqual(LiveAPIClient.mapTransportError(URLError(.notConnectedToInternet)), .offline)
+        XCTAssertFalse(APIError.connectionLost.userMessage.contains("isn't connected"))
+        XCTAssertTrue(APIError.connectionLost.isTransient)
+    }
+
+    /// Render answers 502/503 while the service restarts or deploys, and an
+    /// unmapped URLError arrived as a negative "status". Neither is something a
+    /// reader can do anything with as a number.
+    func testServerTroubleIsNotShownAsARawStatusCode() {
+        let unavailable = APIError.unexpectedStatus(503).userMessage
+        XCTAssertFalse(unavailable.contains("503"), unavailable)
+        XCTAssertTrue(unavailable.contains("Try again"), unavailable)
+
+        let clientSide = APIError.unexpectedStatus(NSURLErrorBadServerResponse).userMessage
+        XCTAssertFalse(clientSide.contains("\(NSURLErrorBadServerResponse)"), clientSide)
+        XCTAssertNotEqual(clientSide, unavailable)
+
+        // Anything else keeps its number: it is rare, and support needs it.
+        XCTAssertTrue(APIError.unexpectedStatus(418).userMessage.contains("418"))
+    }
+
+    /// The server's job store is on a disk a restart wipes, so a job can vanish
+    /// mid-conversion. "This conversion job no longer exists" was true and told
+    /// the reader nothing they could act on.
+    func testAJobLostMidConversionSaysWhatHappened() async {
+        let client = StubAPIClient()
+        client.progressError = APIError.server(
+            code: "http_404", message: "This conversion job no longer exists."
+        )
+        let service = ConversionService(client: client)
+
+        do {
+            _ = try await service.awaitCompletion(id: "job-1") { _ in }
+            XCTFail("expected the vanished job to throw")
+        } catch let error as APIError {
+            guard case .server(let code, let message) = error else {
+                return XCTFail("expected a server error, got \(error)")
+            }
+            XCTAssertEqual(code, "job_lost")
+            XCTAssertFalse(message.contains("job"), message)
+            XCTAssertTrue(message.contains("Try again"), message)
+        } catch {
+            XCTFail("unexpected error type: \(error)")
+        }
     }
 
     /// In the Simulator loopback is the Mac, where "the phone itself" is wrong.
@@ -248,6 +299,32 @@ final class BackendReachabilityTests: XCTestCase {
     func testAFileWithinTheLimitIsNotRefused() {
         let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
         XCTAssertNil(caps.rejection(forByteCount: 6 * 1024 * 1024))
+    }
+
+    /// The size message told App Store users to "raise MAX_UPLOAD_MB on your
+    /// own server" — an environment variable on a server they do not run.
+    func testTheSizeLimitIsExplainedWithoutServerConfiguration() throws {
+        let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
+        let message = try XCTUnwrap(caps.rejection(forByteCount: 60 * 1024 * 1024))
+        XCTAssertFalse(message.contains("MAX_UPLOAD_MB"), message)
+    }
+
+    /// The server publishes its page limit and the app knows the page count
+    /// before uploading, but only the byte size was checked: a long book went
+    /// up in full and was refused once the server opened it.
+    func testABookOverThePageLimitIsRefusedBeforeUpload() throws {
+        let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
+        let message = try XCTUnwrap(caps.rejection(forByteCount: 1024 * 1024, pageCount: 700))
+        XCTAssertTrue(message.contains("700"), message)
+        XCTAssertTrue(message.contains("600"), message)
+    }
+
+    func testAPageCountWithinTheLimitOrUnknownIsAccepted() {
+        let caps = BackendCapabilities(maxUploadMB: 25, maxPageCount: 600)
+        XCTAssertNil(caps.rejection(forByteCount: 1024 * 1024, pageCount: 600))
+        XCTAssertNil(caps.rejection(forByteCount: 1024 * 1024, pageCount: nil))
+        let unstated = BackendCapabilities(maxUploadMB: 25, maxPageCount: 0)
+        XCTAssertNil(unstated.rejection(forByteCount: 1024 * 1024, pageCount: 5000))
     }
 
     /// An older backend does not publish its limits. The app must still convert

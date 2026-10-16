@@ -46,14 +46,20 @@ actor DocumentOCR {
             // A page that will not render or will not read is left to the
             // server. Failing the whole book because one page of a 253-page
             // scan was unreadable would be the worse outcome by far.
-            if let pdfPage = document.page(at: pageNumber - 1),
-               let pageRef = pdfPage.pageRef,
-               let recognised = try? VisionPageOCR.recognise(
-                   page: pageRef, pageNumber: pageNumber
-               ),
-               !recognised.lines.isEmpty {
-                pages.append(recognised)
+            //
+            // One autorelease pool per page: Vision and PDFKit can hand back
+            // autoreleased buffers, and this loop never suspends, so without
+            // one every page's stayed alive until the whole scan was read.
+            // Only a 20-page scan has been measured on a phone.
+            let recognised: ClientOCRPayload.Page? = autoreleasepool {
+                guard let pdfPage = document.page(at: pageNumber - 1),
+                      let pageRef = pdfPage.pageRef,
+                      let page = try? VisionPageOCR.recognise(page: pageRef, pageNumber: pageNumber),
+                      !page.lines.isEmpty
+                else { return nil }
+                return page
             }
+            if let recognised { pages.append(recognised) }
             onProgress(Progress(pagesDone: index + 1, pagesTotal: scanned.count))
         }
 

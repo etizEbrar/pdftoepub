@@ -233,8 +233,8 @@
             <p>
               Pages without a text layer go to Apple Vision at its
               <code>.accurate</code> level, which reads Turkish natively. The
-              page images never leave the device — only the recognised words
-              and their positions are uploaded.
+              recognised words and their positions are uploaded with the PDF,
+              so the server never has to read the scan again.
             </p>
             <span class="steps__where">on device · Apple Vision</span>
           </div>
@@ -372,8 +372,8 @@
           <h3>On-device neural OCR</h3>
           <p>
             Apple Vision reads scanned pages on the Neural Engine at about two
-            seconds a page, with Turkish supported natively. Private by
-            construction: the page images stay on your phone.
+            seconds a page, with Turkish supported natively. Recognition
+            happens on your phone, so the server never re-reads your scan.
           </p>
           <span class="card__note">Measured: 2.1 s/page vs 110 s server-side</span>
         </article>
@@ -457,7 +457,7 @@
         <article class="panel">
           <h3>Stays on the device</h3>
           <ul class="defects">
-            <li><b>Page images from scans</b><span>Rasterised for Vision and discarded. Never uploaded.</span></li>
+            <li><b>Page images rendered for OCR</b><span>Rasterised for Vision and discarded. The PDF is the only copy of a scan that is uploaded.</span></li>
             <li><b>Your library</b><span>No accounts, no sync, no identifiers.</span></li>
             <li><b>Usage</b><span>No analytics or crash-tracking SDKs of any kind.</span></li>
           </ul>

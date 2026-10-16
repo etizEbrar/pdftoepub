@@ -10,8 +10,8 @@ the software.
 | --- | --- |
 | Bundle ID | `com.pdftoepub.app` |
 | Team | `23766BZUS5` |
-| Version | `1.0` |
-| Build | `1` |
+| Version | `1.0.1` |
+| Build | `8` |
 | Devices | iPhone only (`UIDeviceFamily = [1]`) |
 | Minimum iOS | 17.0 |
 | Encryption | `ITSAppUsesNonExemptEncryption = false` — standard HTTPS only |
@@ -69,8 +69,20 @@ PRIVATE BY DESIGN
 Every ebook is validated with EPUBCheck before you get it, so it opens in Apple
 Books and everywhere else.
 
-PDF to EPUB converts using a server you configure. See the Support page for
-setup.
+There is nothing to set up: books convert on the app's own server. If you would
+rather run the conversion server yourself, the Support page explains how.
+```
+
+## What's New in This Version (1.0.1)
+
+```
+• Read the whole book in the app: Preview now moves chapter by chapter.
+• Scanned books are read on your iPhone, so long scans finish instead of
+  timing out.
+• Clearer messages when the server can't be reached, with Try again that
+  really tries again.
+• A book over the size or page limit is caught before it is uploaded.
+• No more endless "Waking the conversion server" wait.
 ```
 
 ## Keywords (100 char max, comma-separated, no spaces)
@@ -113,37 +125,42 @@ owner name and support email.
 
 ## Review notes
 
+Written for build 1.0.1 (8). Attach a sample PDF under App Review Information →
+Attachment before submitting — the app does not ship one, and the 1.0 notes
+wrongly said it did.
+
 ```
-This app converts PDFs using a hosted server. No account or login is required.
+This app converts PDFs into EPUB ebooks using a hosted server. No account or
+login is required, and nothing needs configuring.
 
 Server: https://pdftoepub-backend.onrender.com
 
-PLEASE READ FIRST — the first request may take up to 60 seconds.
-The backend runs on a free hosting tier that suspends the service after about
-15 minutes without traffic. The first conversion after an idle period has to
-wake it, so the app can appear to sit on "Uploading" or "Queued" for up to a
-minute. It is not frozen. Subsequent conversions start immediately. If you would
-like us to move it to an always-on tier for the duration of the review, please
-let us know and we will do so.
+PLEASE READ FIRST — the first conversion may take up to a minute to start.
+The backend runs on a hosting tier that suspends the service after about 15
+minutes without traffic. The first conversion after an idle period wakes it,
+and after a few seconds the app says so ("Waking the conversion server"). It
+is not frozen, and later conversions start immediately. If you would like it
+moved to an always-on tier for the review, let us know and we will do so.
 
 Steps:
 1. Open the app and tap "Select PDF".
-2. Choose any PDF. A sample is included in the app's own folder, reachable
-   through the Files picker under "On My iPhone" > "PDF to EPUB".
-3. Pick a conversion mode and tap "Convert to EPUB".
-4. Progress is shown per page. Allow the extra wake-up time on the first run.
-5. The quality report appears — pages, chapters, footnotes linked, EPUB3
-   validation, and whether any AI was used (it reports "None (fully local)").
-6. Tap "Preview EPUB" to read it in the app, or "Share or Save to Files" to
-   open it in Apple Books.
+2. Choose any PDF from Files. A sample PDF is attached to this submission.
+3. Pick a conversion quality and tap "Convert to EPUB". Progress is shown by
+   stage and page. A scanned PDF is first read on the device ("Reading the
+   scan on this iPhone").
+4. "Conversion complete" shows the book's pages, chapters and words.
+5. Tap "Preview EPUB" to read it in the app; the arrows at the bottom move
+   between chapters. "Share or Export" opens it in Apple Books or saves it to
+   Files. "Send to Kindle" hands it to the Kindle app when that is installed.
 
 Notes:
-- No AI service is used. Conversion is deterministic software running on the
-  server; the quality report shows "None (fully local)" for every conversion.
+- Settings shows the server address, pre-filled with the app's own server.
+  Nothing needs changing; the field is there for people who run their own
+  conversion server. "Test connection" checks the server and shows that no AI
+  provider is in use ("Structural review: Not in use").
+- No AI service is used in the conversion.
 - The uploaded PDF is deleted from the server as soon as the app has the
   finished EPUB. Nothing is retained and no account is associated with it.
-- If a server address field is visible in Settings, the build was not configured
-  with a hosted backend. The submitted build is, and the field is hidden.
 ```
 
 ## Export compliance

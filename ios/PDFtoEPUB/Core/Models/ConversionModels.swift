@@ -123,14 +123,21 @@ struct BackendCapabilities: Codable {
 
     /// Nil when the file is acceptable, otherwise why it is not. A limit of
     /// zero means the server did not state one, so nothing is refused.
-    func rejection(forByteCount bytes: Int) -> String? {
-        guard maxUploadMB > 0 else { return nil }
-        let limit = maxUploadMB * 1024 * 1024
-        guard bytes > limit else { return nil }
-        let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-        return "This PDF is \(size), and the conversion server accepts up to "
-            + "\(maxUploadMB) MB. Try a smaller file, or raise MAX_UPLOAD_MB "
-            + "on your own server."
+    ///
+    /// The page count is checked here too, because the app knows it before
+    /// uploading: the server only enforces its page limit once it opens the
+    /// book, after the whole file has been sent and has waited its turn.
+    func rejection(forByteCount bytes: Int, pageCount: Int? = nil) -> String? {
+        if maxUploadMB > 0, bytes > maxUploadMB * 1024 * 1024 {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+            return "This PDF is \(size), and the conversion server accepts files "
+                + "up to \(maxUploadMB) MB. Try a smaller file."
+        }
+        if maxPageCount > 0, let pageCount, pageCount > maxPageCount {
+            return "This PDF has \(pageCount) pages, and the conversion server accepts "
+                + "up to \(maxPageCount). Try a shorter PDF."
+        }
+        return nil
     }
 }
 

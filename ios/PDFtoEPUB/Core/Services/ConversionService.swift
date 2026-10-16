@@ -86,6 +86,12 @@ actor ConversionService {
                 }
                 try await Task.sleep(for: .seconds(Self.pollIntervalSeconds))
                 continue
+            } catch APIError.server(let code, _) where code == "http_404" {
+                // The job is gone mid-conversion. The server keeps jobs on a
+                // disk a restart wipes, so that is what this nearly always is;
+                // "This conversion job no longer exists" said so in words a
+                // reader could do nothing with.
+                throw Self.jobLost
             }
 
             onProgress(progress)
@@ -115,4 +121,12 @@ actor ConversionService {
 
     private static let pollIntervalSeconds = 1.0
     private static let maxTransientFailures = 10
+
+    private static let jobLost = APIError.server(
+        code: "job_lost",
+        message: """
+            The server stopped working on this book before it finished, usually \
+            because it restarted. Try again. Your original PDF was not modified.
+            """
+    )
 }

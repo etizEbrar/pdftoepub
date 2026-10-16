@@ -24,9 +24,23 @@ struct ConversionErrorView: View {
     }
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.loose) {
-            Spacer()
+        // The message scrolls and the actions stay pinned beneath it. As one
+        // centred stack, a long message at a large text size or in landscape
+        // overflowed the screen and pushed "Try again" off the bottom of it.
+        GeometryReader { proxy in
+            ScrollView {
+                message
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(Color(.systemGroupedBackground))
+        .safeAreaInset(edge: .bottom) { actions }
+        .accessibilityElement(children: .contain)
+    }
 
+    private var message: some View {
+        VStack(spacing: Theme.Spacing.loose) {
             Image(systemName: iconName)
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.secondary)
@@ -63,46 +77,44 @@ struct ConversionErrorView: View {
                 }
             }
             .padding(.horizontal, Theme.Spacing.loose)
+        }
+        .padding(.vertical, Theme.Spacing.section)
+    }
 
-            Spacer()
-
-            VStack(spacing: Theme.Spacing.tight) {
-                if isConfigurationProblem {
-                    // Offered first when the address is an override: a stale
-                    // one is the likeliest reason a working app stops
-                    // reaching anything, and this is the whole fix.
-                    if isOverridingBuiltInAddress {
-                        Button("Use the app's own server", action: onUseBuiltInServer)
-                            .buttonStyle(PrimaryButtonStyle())
-                            .accessibilityIdentifier("error.useBuiltInServer")
-                        Button("Open Settings", action: onOpenSettings)
-                            .buttonStyle(SecondaryButtonStyle())
-                    } else {
-                        Button("Open Settings", action: onOpenSettings)
-                            .buttonStyle(PrimaryButtonStyle())
-                    }
-                    // Offered whether or not the failure is retryable as it
-                    // stands: these are fixed in Settings, and trying again is
-                    // what comes after. Without it, an unset or mistyped address
-                    // left one button, and closing Settings came back to this
-                    // screen with no way forward short of force-quitting.
-                    Button("Try again", action: onRetry)
+    private var actions: some View {
+        VStack(spacing: Theme.Spacing.tight) {
+            if isConfigurationProblem {
+                // Offered first when the address is an override: a stale
+                // one is the likeliest reason a working app stops
+                // reaching anything, and this is the whole fix.
+                if isOverridingBuiltInAddress {
+                    Button("Use the app's own server", action: onUseBuiltInServer)
+                        .buttonStyle(PrimaryButtonStyle())
+                        .accessibilityIdentifier("error.useBuiltInServer")
+                    Button("Open Settings", action: onOpenSettings)
                         .buttonStyle(SecondaryButtonStyle())
                 } else {
-                    if failure.isRetryable {
-                        Button("Try again", action: onRetry)
-                            .buttonStyle(PrimaryButtonStyle())
-                    }
-                    Button("Choose a different PDF", action: onChooseDifferent)
-                        .buttonStyle(failure.isRetryable ? AnyButtonStyle(SecondaryButtonStyle()) : AnyButtonStyle(PrimaryButtonStyle()))
+                    Button("Open Settings", action: onOpenSettings)
+                        .buttonStyle(PrimaryButtonStyle())
                 }
+                // Offered whether or not the failure is retryable as it
+                // stands: these are fixed in Settings, and trying again is
+                // what comes after. Without it, an unset or mistyped address
+                // left one button, and closing Settings came back to this
+                // screen with no way forward short of force-quitting.
+                Button("Try again", action: onRetry)
+                    .buttonStyle(SecondaryButtonStyle())
+            } else {
+                if failure.isRetryable {
+                    Button("Try again", action: onRetry)
+                        .buttonStyle(PrimaryButtonStyle())
+                }
+                Button("Choose a different PDF", action: onChooseDifferent)
+                    .buttonStyle(failure.isRetryable ? AnyButtonStyle(SecondaryButtonStyle()) : AnyButtonStyle(PrimaryButtonStyle()))
             }
-            .padding(.horizontal, Theme.Spacing.regular)
-            .padding(.bottom, Theme.Spacing.section)
         }
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemGroupedBackground))
-        .accessibilityElement(children: .contain)
+        .padding(Theme.Spacing.regular)
+        .background(.bar)
     }
 
     /// Maps the backend's stable error codes (app/core/errors.py) to copy.

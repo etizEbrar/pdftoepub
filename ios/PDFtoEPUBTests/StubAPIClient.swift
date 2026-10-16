@@ -56,7 +56,12 @@ final class StubAPIClient: APIClient, @unchecked Sendable {
         return try createResult.get()
     }
 
+    /// Thrown by every progress poll when set, as a server that has lost the
+    /// job, or a dropped connection, would.
+    var progressError: Error?
+
     func fetchProgress(id: String) async throws -> ConversionProgress {
+        if let progressError { throw progressError }
         guard progressIndex < progressSequence.count else {
             return progressSequence.last ?? ConversionProgress(
                 id: id, status: .completed, stageDetail: "Done", page: 0, totalPages: 0, percent: 100

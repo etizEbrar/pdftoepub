@@ -51,6 +51,9 @@ enum APIError: LocalizedError, Equatable {
     case notConfigured
     /// The device has no working network connection at all.
     case offline
+    /// The connection dropped part-way. The device is online — the server, or
+    /// something between, closed it — so `offline`'s advice would be wrong.
+    case connectionLost
     /// The address resolves to nothing — usually a typo in the host name.
     case hostNotFound
     /// The host is there but nothing is listening — server is down or the
@@ -78,6 +81,11 @@ enum APIError: LocalizedError, Equatable {
                 """
         case .offline:
             return "This device isn't connected to a network. Your original PDF was not modified."
+        case .connectionLost:
+            return """
+                The connection to the server dropped before it finished. Try \
+                again. Your original PDF was not modified.
+                """
         case .hostNotFound:
             return """
                 No server was found at that address. Check the address in \
@@ -91,6 +99,19 @@ enum APIError: LocalizedError, Equatable {
             return "The server took too long to respond. Your original PDF was not modified."
         case .server(_, let message):
             return message
+        // Render answers 502/503 while the service restarts or deploys.
+        case .unexpectedStatus(let status) where (500...599).contains(status):
+            return """
+                The conversion server is having trouble right now. Try again in \
+                a few minutes. Your original PDF was not modified.
+                """
+        // A URLError code rather than an HTTP status: the request failed on
+        // this side, so "the server returned" would be untrue.
+        case .unexpectedStatus(let status) where status < 0:
+            return """
+                Something went wrong while reaching the conversion server. Try \
+                again. Your original PDF was not modified.
+                """
         case .unexpectedStatus(let status):
             return "The server returned an unexpected response (\(status)). Your original PDF was not modified."
         case .decoding:
@@ -107,7 +128,7 @@ enum APIError: LocalizedError, Equatable {
     /// is *not* transient — it is a final answer and must surface immediately.
     var isTransient: Bool {
         switch self {
-        case .offline, .serverUnavailable, .timedOut, .unexpectedStatus:
+        case .offline, .connectionLost, .serverUnavailable, .timedOut, .unexpectedStatus:
             return true
         // A bad address or an unconfigured app will not fix itself by polling.
         case .server, .invalidURL, .notConfigured, .hostNotFound, .decoding,

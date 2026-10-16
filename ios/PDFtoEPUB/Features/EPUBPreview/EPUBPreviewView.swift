@@ -13,6 +13,10 @@ struct EPUBPreviewView: View {
     let onDismiss: () -> Void
 
     @State private var state: LoadState = .loading
+    /// The spine document on screen. Chapters do not link to one another, so
+    /// without a way to move between them the reader showed the first chapter
+    /// and nothing after it.
+    @State private var chapterIndex = 0
 
     enum LoadState {
         case loading
@@ -28,8 +32,7 @@ struct EPUBPreviewView: View {
                     ProgressView("Opening…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .ready(let document):
-                    EPUBWebView(document: document)
-                        .ignoresSafeArea(edges: .bottom)
+                    reader(for: document)
                 case .failed(let message):
                     unreadable(message)
                 }
@@ -43,6 +46,54 @@ struct EPUBPreviewView: View {
             }
         }
         .task { await load() }
+        .onDisappear {
+            if case .ready(let document) = state { document.close() }
+        }
+    }
+
+    @ViewBuilder
+    private func reader(for document: EPUBDocument) -> some View {
+        if document.chapters.count > 1 {
+            VStack(spacing: 0) {
+                EPUBWebView(document: document, chapterIndex: $chapterIndex)
+                Divider()
+                chapterBar(count: document.chapters.count)
+            }
+        } else {
+            EPUBWebView(document: document, chapterIndex: $chapterIndex)
+                .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    private func chapterBar(count: Int) -> some View {
+        HStack {
+            Button {
+                chapterIndex -= 1
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(chapterIndex == 0)
+            .accessibilityLabel("Previous chapter")
+
+            Spacer()
+            Text("Chapter \(chapterIndex + 1) of \(count)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Spacer()
+
+            Button {
+                chapterIndex += 1
+            } label: {
+                Image(systemName: "chevron.forward")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(chapterIndex >= count - 1)
+            .accessibilityLabel("Next chapter")
+        }
+        .padding(.horizontal, Theme.Spacing.regular)
+        .background(.bar)
     }
 
     private func unreadable(_ message: String) -> some View {
@@ -79,81 +130,10 @@ struct EPUBPreviewView: View {
     }
 }
 
-/// An unpacked book: where it lives, and the chapters in reading order.
-struct EPUBDocument {
-    let root: URL
-    /// Absolute file URLs of the spine documents, in order.
-    let chapters: [URL]
-
-    static func open(_ archive: URL) throws -> EPUBDocument {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("preview-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try EPUBArchive.unpack(archive, into: root)
-
-        let opf = try locateOPF(in: root)
-        let chapters = try spine(from: opf)
-        guard !chapters.isEmpty else {
-            throw EPUBArchive.Failure.corruptEntry("the book lists no chapters")
-        }
-        return EPUBDocument(root: root, chapters: chapters)
-    }
-
-    /// META-INF/container.xml names the package document; its location is not
-    /// fixed by the specification, so it is read rather than assumed.
-    private static func locateOPF(in root: URL) throws -> URL {
-        let container = root.appendingPathComponent("META-INF/container.xml")
-        let xml = try String(contentsOf: container, encoding: .utf8)
-        guard let path = firstAttribute("full-path", in: xml) else {
-            throw EPUBArchive.Failure.corruptEntry("container.xml")
-        }
-        return root.appendingPathComponent(path)
-    }
-
-    /// The spine gives reading order by idref; the manifest maps each id to a
-    /// file. Both are needed, and the order is the spine's, not the manifest's.
-    private static func spine(from opf: URL) throws -> [URL] {
-        let xml = try String(contentsOf: opf, encoding: .utf8)
-        let base = opf.deletingLastPathComponent()
-
-        var manifest: [String: String] = [:]
-        for item in matches(of: "<item\\b[^>]*>", in: xml) {
-            if let id = firstAttribute("id", in: item), let href = firstAttribute("href", in: item) {
-                manifest[id] = href
-            }
-        }
-        var ordered: [URL] = []
-        for ref in matches(of: "<itemref\\b[^>]*>", in: xml) {
-            if let idref = firstAttribute("idref", in: ref), let href = manifest[idref] {
-                ordered.append(base.appendingPathComponent(href))
-            }
-        }
-        return ordered
-    }
-
-    private static func matches(of pattern: String, in text: String) -> [String] {
-        guard let re = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
-            return []
-        }
-        let range = NSRange(text.startIndex..., in: text)
-        return re.matches(in: text, range: range).compactMap {
-            Range($0.range, in: text).map { r in String(text[r]) }
-        }
-    }
-
-    private static func firstAttribute(_ name: String, in fragment: String) -> String? {
-        let pattern = "\(name)\\s*=\\s*[\"']([^\"']+)[\"']"
-        guard let re = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-              let m = re.firstMatch(in: fragment, range: NSRange(fragment.startIndex..., in: fragment)),
-              let r = Range(m.range(at: 1), in: fragment)
-        else { return nil }
-        return String(fragment[r])
-    }
-}
-
-/// Renders the book's chapters, one scrolling document.
+/// Renders one chapter of the book at a time.
 private struct EPUBWebView: UIViewRepresentable {
     let document: EPUBDocument
+    @Binding var chapterIndex: Int
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -167,22 +147,33 @@ private struct EPUBWebView: UIViewRepresentable {
         webView.isOpaque = false
         webView.backgroundColor = .systemBackground
         webView.scrollView.contentInsetAdjustmentBehavior = .always
+        // Notes link across chapter files; a swipe brings the reader back to
+        // the place they tapped from.
+        webView.allowsBackForwardNavigationGestures = true
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        guard !context.coordinator.hasLoaded else { return }
-        context.coordinator.hasLoaded = true
-        // Load the first chapter and grant read access to the whole unpacked
-        // book, so its stylesheet, images and sibling chapters resolve.
-        webView.loadFileURL(document.chapters[0], allowingReadAccessTo: document.root)
+        let coordinator = context.coordinator
+        // A link or a swipe can land on another chapter; keep the bar's
+        // position in step with what is actually on screen.
+        coordinator.onChapterShown = { index in
+            if chapterIndex != index { chapterIndex = index }
+        }
+        guard coordinator.shownChapter != chapterIndex else { return }
+        coordinator.shownChapter = chapterIndex
+        // Grant read access to the whole unpacked book, so its stylesheet,
+        // images and sibling chapters resolve.
+        webView.loadFileURL(document.chapters[chapterIndex], allowingReadAccessTo: document.root)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(document: document) }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         private let document: EPUBDocument
-        var hasLoaded = false
+        /// The chapter last loaded or navigated to; nil before the first load.
+        var shownChapter: Int?
+        var onChapterShown: ((Int) -> Void)?
 
         init(document: EPUBDocument) { self.document = document }
 
@@ -208,6 +199,11 @@ private struct EPUBWebView: UIViewRepresentable {
             document.head.appendChild(s);
             """
             webView.evaluateJavaScript(css)
+
+            if let url = webView.url, let index = document.chapterIndex(of: url) {
+                shownChapter = index
+                onChapterShown?(index)
+            }
         }
 
         /// Keep navigation inside the book. A link to another chapter loads;

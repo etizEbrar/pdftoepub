@@ -82,10 +82,34 @@ struct HomeView: View {
         }
     }
 
+    /// The introduction scrolls and "Select PDF" stays pinned beneath it: as
+    /// one centred stack, landscape or a large text size pushed the app's only
+    /// action off the bottom of the screen.
     private var emptyState: some View {
-        VStack(spacing: Theme.Spacing.loose) {
-            Spacer()
+        GeometryReader { proxy in
+            ScrollView {
+                introduction
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(Color(.systemGroupedBackground))
+        .safeAreaInset(edge: .bottom) {
+            Button("Select PDF") { isImporterPresented = true }
+                .buttonStyle(PrimaryButtonStyle())
+                .padding(.horizontal, Theme.Spacing.loose)
+                .padding(.vertical, Theme.Spacing.regular)
+                .background(Color(.systemGroupedBackground))
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, url.pathExtension.lowercased() == "pdf" else { return false }
+            viewModel.selectDocument(at: url)
+            return true
+        }
+    }
 
+    private var introduction: some View {
+        VStack(spacing: Theme.Spacing.loose) {
             Image(systemName: "book.pages")
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(Color.accentColor)
@@ -107,21 +131,8 @@ struct HomeView: View {
             if settings.needsBackendSetup {
                 setupPrompt
             }
-
-            Spacer()
-
-            Button("Select PDF") { isImporterPresented = true }
-                .buttonStyle(PrimaryButtonStyle())
-                .padding(.horizontal, Theme.Spacing.loose)
-                .padding(.bottom, Theme.Spacing.section)
         }
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemGroupedBackground))
-        .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first, url.pathExtension.lowercased() == "pdf" else { return false }
-            viewModel.selectDocument(at: url)
-            return true
-        }
+        .padding(.vertical, Theme.Spacing.section)
     }
 
     /// Shown when no conversion server is configured. This build ships without a

@@ -16,12 +16,17 @@ final class EPUBReaderTests: XCTestCase {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// Skips rather than fails without one: the corpus lives in a scratch
+    /// folder on one Mac, and a missing file there turned the whole suite red
+    /// everywhere else. `UnpackedBookTests` below runs on any machine.
     private func requireCorpusEPUB() throws -> URL {
-        try XCTUnwrap(
-            corpusEPUB,
-            "No converted EPUB on this machine. Generate one first: "
-            + "backend/.venv/bin/python <scratchpad>/corpus.py"
-        )
+        guard let corpusEPUB else {
+            throw XCTSkip(
+                "No converted EPUB on this machine. Generate one first: "
+                + "backend/.venv/bin/python <scratchpad>/corpus.py"
+            )
+        }
+        return corpusEPUB
     }
 
     // MARK: - Archive
@@ -122,6 +127,102 @@ final class EPUBReaderTests: XCTestCase {
                 resolved.hasPrefix(dir.standardized.path),
                 "\(name) resolved outside the destination"
             )
+        }
+    }
+}
+
+/// The reader's handling of an unpacked book, built here file by file in the
+/// shape the backend writes, so it needs nothing from any particular machine.
+final class UnpackedBookTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unpacked-\(UUID().uuidString)", isDirectory: true)
+        try write("META-INF/container.xml", """
+            <?xml version="1.0"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+            """)
+        // Manifest order deliberately differs from spine order.
+        try write("OEBPS/content.opf", """
+            <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+            <manifest>
+            <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+            <item id="chap002" href="text/chapter-2.xhtml" media-type="application/xhtml+xml"/>
+            <item id="chap001" href="text/chapter-1.xhtml" media-type="application/xhtml+xml"/>
+            <item id="chap003" href="text/chapter-3.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine toc="ncx">
+            <itemref idref="chap001"/>
+            <itemref idref="chap002"/>
+            <itemref idref="chap003"/>
+            </spine>
+            </package>
+            """)
+        for n in 1...3 {
+            try write("OEBPS/text/chapter-\(n).xhtml", "<html><body><p>Chapter \(n)</p></body></html>")
+        }
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+        try super.tearDownWithError()
+    }
+
+    private func write(_ path: String, _ text: String) throws {
+        let url = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data(text.utf8).write(to: url)
+    }
+
+    func testChaptersFollowTheSpineNotTheManifest() throws {
+        let document = try EPUBDocument.load(unpackedAt: root)
+        XCTAssertEqual(
+            document.chapters.map(\.lastPathComponent),
+            ["chapter-1.xhtml", "chapter-2.xhtml", "chapter-3.xhtml"]
+        )
+    }
+
+    /// What keeps the chapter bar in step when a note link lands in another
+    /// chapter: the web view reports the URL with the fragment it scrolled to.
+    func testALinkIntoAChapterIsRecognisedAsThatChapter() throws {
+        let document = try EPUBDocument.load(unpackedAt: root)
+        let third = document.chapters[2]
+        let linked = try XCTUnwrap(URL(string: third.absoluteString + "#note-12"))
+        XCTAssertEqual(document.chapterIndex(of: linked), 2)
+        XCTAssertNil(document.chapterIndex(of: root.appendingPathComponent("OEBPS/nav.xhtml")))
+    }
+
+    /// Opening a preview left an unpacked copy of the book behind every time.
+    func testClosingAPreviewRemovesItsFiles() throws {
+        let document = try EPUBDocument.load(unpackedAt: root)
+        document.close()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    /// One the app was closed during is cleared before the next one opens.
+    func testLeftoverPreviewsAreSwept() throws {
+        let leftover = EPUBDocument.previewsDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: leftover, withIntermediateDirectories: true)
+
+        EPUBDocument.sweepPreviews()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: leftover.path))
+    }
+
+    func testABookWithoutChaptersIsRejectedClearly() throws {
+        try write("OEBPS/content.opf", "<package><manifest/><spine/></package>")
+        XCTAssertThrowsError(try EPUBDocument.load(unpackedAt: root)) { error in
+            XCTAssertFalse(error.localizedDescription.isEmpty)
         }
     }
 }

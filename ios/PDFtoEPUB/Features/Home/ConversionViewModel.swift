@@ -80,6 +80,12 @@ final class ConversionViewModel {
     }
 
     func clearSelection() {
+        // The finished book has been read, shared or saved by now; each copy
+        // the system handed on is its own. Left here, every conversion stayed
+        // in the app's temporary folder until iOS got round to purging it.
+        if case .completed(_, _, let epubURL) = phase {
+            try? FileManager.default.removeItem(at: epubURL)
+        }
         conversionTask?.cancel()
         conversionTask = nil
         currentJobID = nil
@@ -145,7 +151,9 @@ final class ConversionViewModel {
                 // address, instead of leaving the upload to stall behind a
                 // spinner that said "Waking the conversion server" forever.
                 let capabilities = try await service.capabilities()
-                if let reason = capabilities.rejection(forByteCount: document.byteCount) {
+                if let reason = capabilities.rejection(
+                    forByteCount: document.byteCount, pageCount: document.pageCount
+                ) {
                     await MainActor.run {
                         self.phase = .failed(
                             ConversionFailure(

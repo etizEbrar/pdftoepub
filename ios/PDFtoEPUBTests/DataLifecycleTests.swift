@@ -11,17 +11,19 @@ final class DataLifecycleTests: XCTestCase {
 
     /// A real one-page PDF, so the flow goes through the actual inspector
     /// rather than a stubbed document.
-    private func writeTemporaryPDF() throws -> URL {
+    private func writeTemporaryPDF(pages: Int = 1) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("lifecycle-\(UUID().uuidString).pdf")
         let bounds = CGRect(x: 0, y: 0, width: 612, height: 792)
         let renderer = UIGraphicsPDFRenderer(bounds: bounds)
         try renderer.writePDF(to: url) { context in
-            context.beginPage()
-            ("Hello" as NSString).draw(
-                at: CGPoint(x: 72, y: 72),
-                withAttributes: [.font: UIFont.systemFont(ofSize: 12)]
-            )
+            for _ in 0..<pages {
+                context.beginPage()
+                ("Hello" as NSString).draw(
+                    at: CGPoint(x: 72, y: 72),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 12)]
+                )
+            }
         }
         return url
     }
@@ -146,6 +148,62 @@ final class DataLifecycleTests: XCTestCase {
         viewModel.retry()
         try await waitForCompletion(viewModel)
         XCTAssertEqual(client.capabilitiesCallCount, 2, "the retry never reached the server")
+    }
+
+    /// Every finished book used to stay in the temporary folder after the
+    /// reader moved on, until iOS got round to purging it.
+    func testConvertingAnotherBookDeletesTheLastOne() async throws {
+        let pdf = try writeTemporaryPDF()
+        defer { try? FileManager.default.removeItem(at: pdf) }
+        let epub = FileManager.default.temporaryDirectory
+            .appendingPathComponent("finished-\(UUID().uuidString).epub")
+        try Data("epub".utf8).write(to: epub)
+        defer { try? FileManager.default.removeItem(at: epub) }
+
+        let client = completedClient(returning: epub)
+        let settings = AppSettings()
+        let original = settings.baseURLString
+        defer { settings.baseURLString = original }
+        settings.baseURLString = "https://convert.example.com"
+
+        let viewModel = ConversionViewModel(settings: settings, makeClient: { _ in client })
+        viewModel.selectDocument(at: pdf)
+        viewModel.startConversion()
+        try await waitForCompletion(viewModel)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: epub.path))
+
+        viewModel.clearSelection()
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: epub.path),
+            "the finished book outlived the screen that showed it"
+        )
+    }
+
+    /// The server publishes its page limit and only enforced it after the
+    /// whole book had been uploaded and had waited its turn.
+    func testABookOverThePageLimitIsRefusedBeforeUpload() async throws {
+        let pdf = try writeTemporaryPDF(pages: 2)
+        defer { try? FileManager.default.removeItem(at: pdf) }
+
+        let client = StubAPIClient()
+        client.capabilities = BackendCapabilities(maxUploadMB: 25, maxPageCount: 1)
+        let settings = AppSettings()
+        let original = settings.baseURLString
+        defer { settings.baseURLString = original }
+        settings.baseURLString = "https://convert.example.com"
+
+        let viewModel = ConversionViewModel(settings: settings, makeClient: { _ in client })
+        viewModel.selectDocument(at: pdf)
+        viewModel.startConversion()
+        for _ in 0..<200 {
+            if case .failed = viewModel.phase { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+        guard case .failed(let failure) = viewModel.phase else {
+            return XCTFail("expected the page limit to refuse the book, got \(viewModel.phase)")
+        }
+        XCTAssertEqual(failure.code, "file_too_large")
+        XCTAssertEqual(client.createCallCount, 0, "the book was uploaded anyway")
     }
 }
 

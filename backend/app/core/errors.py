@@ -59,10 +59,13 @@ class OCRTooSlowError(ConversionError):
     """
 
     code = "ocr_too_slow"
+    # Shown verbatim in the app, to people who have never seen the server. The
+    # operator's remedy -- a faster machine, or CONVERSION_TIMEOUT_SECONDS --
+    # belongs in the docstring above, not in a message a reader cannot act on.
     user_message = (
-        "This scanned book needs more OCR than this server can finish in time. "
-        "Convert it on a faster machine, or raise the server's conversion time "
-        "limit. Your original PDF was not modified."
+        "This scanned book needs more text recognition than the server can "
+        "finish in time. Try a PDF with fewer scanned pages. Your original PDF "
+        "was not modified."
     )
 
 

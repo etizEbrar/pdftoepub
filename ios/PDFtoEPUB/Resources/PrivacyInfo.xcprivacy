@@ -9,9 +9,9 @@
     <array/>
 
     <!-- No data is collected. The user's PDF is sent to the conversion server
-         the user configures, solely to produce their EPUB, and is deleted after
-         conversion. It is never retained for analytics, profiling or training,
-         and is not linked to any identity. -->
+         (the app's own, or one the user configures) solely to produce their
+         EPUB, and is deleted after conversion. It is never retained for
+         analytics, profiling or training, and is not linked to any identity. -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array/>
 
@@ -28,13 +28,16 @@
             </array>
         </dict>
         <dict>
-            <!-- Reads the chosen PDF and writes the generated EPUB inside the
-                 app's own container so it can be previewed and shared. -->
+            <!-- Reads the size of the PDF the user picks in the document
+                 picker (3B52.1: files the user granted access to), and works
+                 with the generated EPUB inside the app's own container so it
+                 can be previewed and shared (C617.1). -->
             <key>NSPrivacyAccessedAPIType</key>
             <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
             <key>NSPrivacyAccessedAPITypeReasons</key>
             <array>
                 <string>C617.1</string>
+                <string>3B52.1</string>
             </array>
         </dict>
         <dict>
