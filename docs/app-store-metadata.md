@@ -123,7 +123,7 @@ owner name and support email.
 
 ## Review notes
 
-Submitted with build 1.0.1 (8) on 2026-10-17, with `Sample-Book.pdf` (the
+Submitted with build 1.0.1 (9) on 2026-10-17 (build 8 was withdrawn from review for the 429 fix), with `Sample-Book.pdf` (the
 generated `tests/fixtures/corpus/turkish_novel.pdf`) attached under App Review
 Information. One line per bullet in What's New: the store shows line breaks as
 typed.
