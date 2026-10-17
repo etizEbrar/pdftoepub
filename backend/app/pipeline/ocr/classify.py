@@ -122,9 +122,14 @@ def classify_page(
 def classify_document(doc: fitz.Document) -> dict[int, PageTextKind]:
     typical = typical_page_text_length(doc)
     pervasive = has_pervasive_text_layer(doc, typical)
-    return {
-        i + 1: classify_page(doc[i], typical, pervasive) for i in range(doc.page_count)
-    }
+    kinds: dict[int, PageTextKind] = {}
+    for i in range(doc.page_count):
+        kinds[i + 1] = classify_page(doc[i], typical, pervasive)
+        # Classifying decodes each page's images into MuPDF's cache, which
+        # keeps them (up to 256 MB) though they are not looked at again until
+        # the page is read. Measured: +141 MB on a 100-page scan without this.
+        fitz.TOOLS.store_shrink(100)
+    return kinds
 
 
 def pages_needing_ocr(page_kinds: dict[int, PageTextKind]) -> list[int]:

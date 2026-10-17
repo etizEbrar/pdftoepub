@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import gc
 import time
 from datetime import datetime
 from pathlib import Path
+
+import fitz
 
 from app.core.config import settings
 from app.core.errors import (
@@ -145,6 +149,57 @@ def _load_client_ocr(job: Job) -> dict[int, ClientOCRPage]:
     except Exception:
         logger.warning("job %s: client OCR payload unreadable; reading pages here", job.job_id)
         return {}
+
+
+class _LazyPages:
+    """Page objects on demand, by 1-based number, instead of held for the run.
+
+    A dict of every page kept each PyMuPDF page object -- and whatever table
+    detection had parsed out of it -- alive until the book was built: measured
+    at about 100 MB for a 100-page scan, in a 512 MB container. Callers only
+    ever iterate or look one page up, so loading on each access is enough.
+    """
+
+    def __init__(self, doc) -> None:
+        self._doc = doc
+
+    def __len__(self) -> int:
+        return len(self._doc)
+
+    def get(self, number, default=None):
+        if isinstance(number, int) and 1 <= number <= len(self._doc):
+            return self._doc[number - 1]
+        return default
+
+    def __getitem__(self, number):
+        page = self.get(number)
+        if page is None:
+            raise KeyError(number)
+        return page
+
+    def items(self):
+        for index in range(len(self._doc)):
+            yield index + 1, self._doc[index]
+
+
+def _return_memory_to_os() -> None:
+    """Hand freed memory back to the system before the validator starts.
+
+    Python returns freed objects to its own allocator, not to the kernel, so
+    RSS stays at its high-water mark unless glibc is asked to trim. The
+    container's limit counts RSS, so without this the release above would
+    free nothing the JVM could use. A no-op where malloc_trim does not exist.
+    """
+    # MuPDF keeps every decoded page image in its own cache, up to 256 MB by
+    # default. Measured: classifying a 100-page scan grew the process by
+    # 141 MB, and emptying that cache brought it back to 18 MB. On a laptop it
+    # is a speed-up; in a 512 MB container it is most of the budget.
+    fitz.TOOLS.store_shrink(100)
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _run_pipeline_sync(job: Job) -> None:
@@ -320,16 +375,18 @@ def _execute_pipeline(job: Job) -> None:
                 len(needs_ocr),
             )
 
+        # Classification touched every page; its decoded images are not needed
+        # again until each page is read, one at a time.
+        _return_memory_to_os()
         _update(job, stage=JobStage.EXTRACTING, detail="Extracting text and images", page=0)
         pipeline_started = time.monotonic()
         ocr_elapsed = 0.0
         ocr_done = 0
         blocks_by_page: dict[int, list[Block]] = {}
         page_fallback_nodes: list[StructuralNode] = []
-        pages: dict[int, object] = {}
+        pages = _LazyPages(doc)
         for i in range(analysis.page_count):
             page = doc[i]
-            pages[i + 1] = page
             kind = analysis.page_kinds.get(i + 1, PageTextKind.NATIVE)
             client_page = client_ocr.get(i + 1)
             is_ocr_page = kind in (PageTextKind.SCANNED, PageTextKind.MIXED)
@@ -377,6 +434,9 @@ def _execute_pipeline(job: Job) -> None:
             if fallback_node is not None:
                 page_fallback_nodes.append(fallback_node)
             _update(job, page=i + 1)
+            # A scanned page decodes a full-page image; keep only one page's
+            # worth cached at a time rather than letting a long scan fill it.
+            fitz.TOOLS.store_shrink(100)
 
         all_blocks = [b for page_blocks in blocks_by_page.values() for b in page_blocks]
         document.blocks = all_blocks
@@ -455,6 +515,9 @@ def _execute_pipeline(job: Job) -> None:
                     page, blocks_by_page.get(page_num, []), hyphen_evidence
                 )
             )
+            # Measured: each page's table detection left about 4 MB in MuPDF's
+            # cache and never gave it back, so a long book grew without bound.
+            fitz.TOOLS.store_shrink(100)
         tables_module.mark_continuations(detected_tables)
         semantic_tables, table_fallbacks = enrich.apply_tables(
             document, nodes, detected_tables, pages, images_dir
@@ -466,6 +529,8 @@ def _execute_pipeline(job: Job) -> None:
         verse_count = verse_module.detect_verse(nodes, blocks_by_id)
         nodes = paragraphs.reconstruct_paragraphs(nodes, hyphen_evidence)
 
+        # Table detection walks every page's drawings: measured +130 MB here.
+        _return_memory_to_os()
         _update(job, detail="Detecting formulas")
         mathml_count, formula_fallbacks = enrich.apply_formulas(
             document, nodes, blocks_by_id, pages, images_dir
@@ -508,6 +573,25 @@ def _execute_pipeline(job: Job) -> None:
         build_result.unmatched_marker_count = unmatched_markers
         build_result.footnote_linked_count = footnotes_linked
 
+        # EPUBCheck is a separate JVM that runs *beside* this process, inside
+        # the same 512 MB. Measured under that limit with the production image:
+        # a 100-page scan held ~420 MB here after OCR, the JVM pushed the
+        # container over, and the kernel killed it mid-validation -- the job,
+        # and everything else in flight, vanished. Nothing after this point
+        # needs the book's blocks or spans except the integrity check,
+        # which does not depend on validation, so it runs first and the book is
+        # released before the JVM starts.
+        # document.nodes stays: the quality report counts paragraphs from it,
+        # and the tree is mostly strings. The weight is in blocks and spans.
+        integrity = compute_integrity(document, build_result.word_count)
+        document.blocks = []
+        blocks_by_page = pages = all_blocks = text_blocks = None  # noqa: F841
+        ordered_blocks = content_blocks = blocks_by_id = None  # noqa: F841
+        nodes = detected_tables = page_fallback_nodes = None  # noqa: F841
+        hyphen_evidence = furniture = client_ocr = None  # noqa: F841
+        doc.close()
+        _return_memory_to_os()
+
         _update(job, stage=JobStage.VALIDATING, detail="Validating EPUB3 with EPUBCheck")
         validation = validate_epub(epub_path)
         if not validation.passed:
@@ -516,7 +600,6 @@ def _execute_pipeline(job: Job) -> None:
             )
 
         _update(job, stage=JobStage.QUALITY_CHECK, detail="Computing quality report")
-        integrity = compute_integrity(document, build_result.word_count)
         quality = compute_quality_report(
             document,
             build_result,
@@ -531,4 +614,5 @@ def _execute_pipeline(job: Job) -> None:
         job.quality_report = quality
         _update(job, stage=JobStage.COMPLETED, detail="Done")
     finally:
-        doc.close()
+        if not doc.is_closed:
+            doc.close()
