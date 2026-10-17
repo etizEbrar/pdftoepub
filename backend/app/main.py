@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -68,11 +70,25 @@ register_routes(app)
 
 _request_limiter = SlidingWindowLimiter(settings.rate_limit_requests_per_minute, 60.0)
 
+# Reading an existing job: the progress poll a phone makes every second for the
+# whole conversion, the result, and the download at the end. They are the most
+# frequent and cheapest requests the API serves, and a 429 on one throws away a
+# finished book. Job ids are 128 random bits, so there is nothing to enumerate.
+_JOB_READ_RE = re.compile(r"^/v1/conversions/[0-9a-f]{32}(/(progress|result|download))?$")
+
+
+def _is_throttled(request: Request) -> bool:
+    if request.url.path == "/health":
+        return False
+    if request.method in ("GET", "HEAD") and _JOB_READ_RE.match(request.url.path):
+        return False
+    return True
+
 
 @app.middleware("http")
 async def guard_and_harden(request: Request, call_next):
     """Throttle by client and set the response headers a public API should send."""
-    if settings.rate_limit_enabled and request.url.path != "/health":
+    if settings.rate_limit_enabled and _is_throttled(request):
         allowed, retry_after = _request_limiter.check(client_key(request))
         if not allowed:
             return JSONResponse(

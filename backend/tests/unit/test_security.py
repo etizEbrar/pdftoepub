@@ -456,3 +456,33 @@ class TestHealthReportsTheProviderActuallyInUse:
 
         monkeypatch.setattr(live, "ai_provider", "openai")
         assert client.get("/health").json()["ai_provider"] == "local"
+
+
+class TestReadingAJobIsNeverThrottled:
+    """A phone polls its own job once a second for the whole conversion.
+
+    Those reads, and the download at the end, are the commonest and cheapest
+    requests the API serves; a 429 on one of them throws away a finished book.
+    Job ids are 128 random bits, so exempting reads of an existing job from the
+    general limit gives an abuser nothing to enumerate. Uploads stay limited.
+    """
+
+    def _exhaust(self, client, monkeypatch):
+        import app.main
+        monkeypatch.setattr(app.main.settings, "rate_limit_enabled", True)
+        app.main._request_limiter.reset()
+        monkeypatch.setattr(app.main._request_limiter, "_limit", 2)
+        for _ in range(5):
+            client.get("/not-a-job")
+
+    def test_progress_and_download_are_not_throttled(self, client, monkeypatch):
+        self._exhaust(client, monkeypatch)
+        job = "0" * 32
+        for path in (f"/v1/conversions/{job}/progress", f"/v1/conversions/{job}/result",
+                     f"/v1/conversions/{job}/download", f"/v1/conversions/{job}"):
+            assert client.get(path).status_code != 429, path
+
+    def test_everything_else_is_still_throttled(self, client, monkeypatch):
+        self._exhaust(client, monkeypatch)
+        assert client.get("/not-a-job").status_code == 429
+        assert client.post("/v1/conversions").status_code == 429

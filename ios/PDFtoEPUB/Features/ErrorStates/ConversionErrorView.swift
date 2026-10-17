@@ -69,7 +69,10 @@ struct ConversionErrorView: View {
 
                 // Nothing was converted yet in the not-configured case, so the
                 // reassurance would be noise.
-                if failure.code != "backend_not_configured" {
+                // Most messages already end with this sentence; saying it twice
+                // under each other read as a rendering fault.
+                if failure.code != "backend_not_configured",
+                   !failure.message.contains("Your original PDF was not modified") {
                     Text("Your original PDF was not modified.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -131,6 +134,7 @@ struct ConversionErrorView: View {
         case "server_unavailable": return "Can't reach the server"
         case "offline": return "No network connection"
         case "timeout": return "The server stopped responding"
+        case "server_busy": return "The server is busy"
         case "insufficient_storage": return "Not enough space"
         case "network": return "Connection problem"
         default: return "Conversion failed"
@@ -146,6 +150,7 @@ struct ConversionErrorView: View {
         case "server_unavailable", "network": return "bolt.horizontal.circle"
         case "offline": return "wifi.exclamationmark"
         case "timeout": return "clock.badge.exclamationmark"
+        case "server_busy": return "hourglass"
         case "insufficient_storage": return "internaldrive"
         case "epub_validation_failed": return "exclamationmark.triangle"
         default: return "doc.questionmark"

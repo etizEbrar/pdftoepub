@@ -179,6 +179,21 @@ final class LiveAPIClient: APIClient {
         guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
         guard !(200..<300).contains(http.statusCode) else { return }
 
+        // Checked before the body, because a 429 may come from the edge in
+        // front of the server with no JSON at all -- and the download passes
+        // no body -- and both used to surface as "unexpected response (429)".
+        if http.statusCode == 429 {
+            let retryAfter = (http.value(forHTTPHeaderField: "Retry-After")).flatMap { Int($0) }
+            var message: String?
+            if let data, let body = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
+                message = body.message
+            } else if let data,
+                      let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                message = json["detail"] as? String
+            }
+            throw APIError.busy(retryAfter: retryAfter, message: message)
+        }
+
         if let data, let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
             throw APIError.server(code: apiError.code, message: apiError.message)
         }

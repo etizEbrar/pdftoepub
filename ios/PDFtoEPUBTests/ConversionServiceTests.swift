@@ -346,3 +346,82 @@ final class BackendReachabilityTests: XCTestCase {
         XCTAssertEqual(caps.aiProvider, "none")
     }
 }
+
+// MARK: - A throttled server
+
+/// Answers every request with HTTP 429, the way an edge proxy does: an HTML
+/// body and a Retry-After header, no JSON.
+final class Throttled429Protocol: URLProtocol {
+    static var body = Data("<html>error code: 1015</html>".utf8)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 429, httpVersion: "HTTP/1.1",
+            headerFields: ["Retry-After": "7", "Content-Type": "text/html"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// A real phone saw "The server returned an unexpected response (429)" under
+/// "Connection problem", with Open Settings as the main action. A 429 is a
+/// server asking to be left alone for a moment, not a connection or settings
+/// fault, and the download step -- which never read the body -- turned it into
+/// a raw code every time.
+final class ThrottledServerTests: XCTestCase {
+
+    private func client() -> LiveAPIClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Throttled429Protocol.self]
+        return LiveAPIClient(baseURL: URL(string: "https://example.invalid")!,
+                             session: URLSession(configuration: config))
+    }
+
+    func testA429WithoutJSONIsBusyNotUnexpected() async {
+        do {
+            _ = try await client().fetchProgress(id: "abc")
+            XCTFail("expected an error")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .busy(retryAfter: 7, message: nil))
+            XCTAssertTrue(error.isTransient, "a busy server is waited out while polling")
+        } catch { XCTFail("unexpected \(error)") }
+    }
+
+    func testTheDownloadReportsBusyToo() async {
+        do {
+            _ = try await client().downloadEPUB(id: "abc", suggestedFilename: "x.epub")
+            XCTFail("expected an error")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .busy(retryAfter: 7, message: nil))
+        } catch { XCTFail("unexpected \(error)") }
+    }
+
+    func testOurOwnLimiterKeepsItsMessage() async {
+        Throttled429Protocol.body = Data(#"{"code":"rate_limited","message":"Too many requests. Please slow down and try again."}"#.utf8)
+        defer { Throttled429Protocol.body = Data("<html>error code: 1015</html>".utf8) }
+        do {
+            _ = try await client().fetchProgress(id: "abc")
+            XCTFail("expected an error")
+        } catch let error as APIError {
+            XCTAssertEqual(error, .busy(retryAfter: 7, message: "Too many requests. Please slow down and try again."))
+        } catch { XCTFail("unexpected \(error)") }
+    }
+
+    @MainActor
+    func testTheScreenOffersTryAgainNotSettings() {
+        let failure = ConversionViewModel.failure(from: .busy(retryAfter: 7, message: nil), addressKind: .builtIn)
+        XCTAssertEqual(failure.code, "server_busy")
+        XCTAssertTrue(failure.isRetryable)
+        XCTAssertFalse(failure.message.contains("429"), "no raw status code for a reader")
+    }
+
+    func testBackoffHonoursRetryAfterWithinReason() {
+        XCTAssertEqual(ConversionService.backoff(for: .busy(retryAfter: 7, message: nil)), 7)
+        XCTAssertEqual(ConversionService.backoff(for: .busy(retryAfter: 3600, message: nil)), 30)
+        XCTAssertEqual(ConversionService.backoff(for: .busy(retryAfter: nil, message: nil)), 5)
+        XCTAssertEqual(ConversionService.backoff(for: .timedOut), ConversionService.pollIntervalSeconds)
+    }
+}

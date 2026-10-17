@@ -84,7 +84,9 @@ actor ConversionService {
                 if consecutiveTransientFailures > Self.maxTransientFailures {
                     throw error
                 }
-                try await Task.sleep(for: .seconds(Self.pollIntervalSeconds))
+                // Polling again a second later is what a throttle asked us
+                // not to do; wait as long as it said, within reason.
+                try await Task.sleep(for: .seconds(Self.backoff(for: error)))
                 continue
             } catch APIError.server(let code, _) where code == "http_404" {
                 // The job is gone mid-conversion. The server keeps jobs on a
@@ -111,15 +113,33 @@ actor ConversionService {
         }
     }
 
+    /// The book is finished by the time this runs, so a busy server is waited
+    /// out rather than turned into an error that throws the conversion away.
     func download(id: String, filename: String) async throws -> URL {
-        try await client.downloadEPUB(id: id, suggestedFilename: filename)
+        var attempt = 0
+        while true {
+            do {
+                return try await client.downloadEPUB(id: id, suggestedFilename: filename)
+            } catch let error as APIError {
+                guard case .busy = error, attempt < 3 else { throw error }
+                attempt += 1
+                try await Task.sleep(for: .seconds(Self.backoff(for: error)))
+            }
+        }
+    }
+
+    static func backoff(for error: APIError) -> Double {
+        if case .busy(let retryAfter, _) = error {
+            return min(Double(max(retryAfter ?? 5, 1)), 30)
+        }
+        return pollIntervalSeconds
     }
 
     func cleanUp(id: String) async {
         try? await client.deleteConversion(id: id)
     }
 
-    private static let pollIntervalSeconds = 1.0
+    static let pollIntervalSeconds = 1.0
     private static let maxTransientFailures = 10
 
     private static let jobLost = APIError.server(

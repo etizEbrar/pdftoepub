@@ -62,6 +62,10 @@ enum APIError: LocalizedError, Equatable {
     case timedOut
     case server(code: String, message: String)
     case unexpectedStatus(Int)
+    /// HTTP 429: the server, or the edge in front of it, is turning requests
+    /// away for now. Not a connection fault and nothing in Settings fixes it,
+    /// so it says so and waits instead of showing a raw status code.
+    case busy(retryAfter: Int?, message: String?)
     case decoding
     case fileTooLarge(limitMB: Int)
     case cancelled
@@ -112,6 +116,10 @@ enum APIError: LocalizedError, Equatable {
                 Something went wrong while reaching the conversion server. Try \
                 again. Your original PDF was not modified.
                 """
+        case .busy(_, let message?):
+            return message
+        case .busy:
+            return "The conversion server is busy right now. Wait a minute and try again. Your original PDF was not modified."
         case .unexpectedStatus(let status):
             return "The server returned an unexpected response (\(status)). Your original PDF was not modified."
         case .decoding:
@@ -128,7 +136,7 @@ enum APIError: LocalizedError, Equatable {
     /// is *not* transient — it is a final answer and must surface immediately.
     var isTransient: Bool {
         switch self {
-        case .offline, .connectionLost, .serverUnavailable, .timedOut, .unexpectedStatus:
+        case .offline, .connectionLost, .serverUnavailable, .timedOut, .unexpectedStatus, .busy:
             return true
         // A bad address or an unconfigured app will not fix itself by polling.
         case .server, .invalidURL, .notConfigured, .hostNotFound, .decoding,

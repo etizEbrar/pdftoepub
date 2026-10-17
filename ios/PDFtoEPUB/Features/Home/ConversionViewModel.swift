@@ -298,6 +298,7 @@ final class ConversionViewModel {
             code = "server_unavailable"
             message = APIError.unreachableMessage(for: kind)
         case .timedOut: code = "timeout"
+        case .busy: code = "server_busy"
         default: code = "network"
         }
         return ConversionFailure(

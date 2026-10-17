@@ -18,7 +18,7 @@ settings:
     # 90062). Shipping a fix to users who already have 1.0 therefore means
     # bumping this, not just the build number.
     MARKETING_VERSION: "1.0.1"
-    CURRENT_PROJECT_VERSION: "8"
+    CURRENT_PROJECT_VERSION: "9"
     # Address of the hosted conversion backend. Deliberately empty: no backend
     # is deployed yet, and shipping a placeholder would produce a build that
     # fails mysteriously instead of one that asks the user for an address.
