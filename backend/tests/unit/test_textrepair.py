@@ -166,9 +166,21 @@ def test_never_joins_across_a_common_single_letter_word():
 def test_suspicious_text_is_reported_but_never_modified():
     original = "bir enerjidirVarlıkları sen"
     blocks = [_block(original)]
+    blocks[0].source = "ocr"
     report = repair_blocks(blocks)
     assert blocks[0].text == original
     assert any(c.kind is CorrectionKind.SUSPICIOUS for c in report.rejected)
+
+
+def test_a_real_text_layer_is_never_reported_as_scanning_artefacts():
+    """A born-digital volume was flagged for 86 "scanning artefacts": LeCun,
+    DeepMind, ORCID iDs and the leader dots of its contents page."""
+    blocks = [
+        _block("(LeCun vd., 2015) Google DeepMind tarafından ORCID ID: 0000-0003-2621-9"),
+        _block("Editörden………………………….……………………1", block_id="b2"),
+    ]
+    report = repair_blocks(blocks)
+    assert not any(c.kind is CorrectionKind.SUSPICIOUS for c in report.rejected)
 
 
 def test_disabling_repair_leaves_every_block_untouched():

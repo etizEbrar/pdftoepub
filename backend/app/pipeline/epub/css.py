@@ -88,6 +88,25 @@ p.caption {
   margin: 0.4em 0 1em;
 }
 
+/* One reference of a bibliography, set with the hanging indent of the print. */
+p.bib-entry {
+  margin: 0 0 0.5em 0;
+  padding-left: 1.5em;
+  text-indent: -1.5em;
+  text-align: left;
+}
+
+/* An entry of the book's printed contents, linked to its chapter. */
+p.toc-entry {
+  margin: 0.25em 0;
+  text-align: left;
+  text-indent: 0;
+}
+
+p.toc-entry a {
+  text-decoration: none;
+}
+
 /* A note-shaped block that nothing in the text refers to. Set like a note, but
    an ordinary paragraph, so a reading system that hides unopened footnotes
    cannot make it unreachable. */

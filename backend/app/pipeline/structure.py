@@ -5,6 +5,8 @@ import statistics
 
 from app.models.document import Block, BlockRole, StructuralNode
 from app.pipeline import headings as headings_module
+from app.pipeline import toc as toc_module
+from app.pipeline.footnotes import strip_all_sentinels
 
 BULLET_RE = re.compile(r"^[•●○◦▪‣–\-\*]\s+")
 NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
@@ -108,7 +110,12 @@ def _heading_level(size_ratio: float) -> int:
 
 
 def _first_line(text: str) -> str:
-    return text.split("\n", 1)[0].strip()
+    # The first line that says anything: a block can open with a blank line
+    # MuPDF kept above a caption, which hid "Şekil 7:" from every test.
+    for line in text.split("\n"):
+        if line.strip():
+            return line.strip()
+    return ""
 
 
 # A note set at 0.75x body or smaller is unambiguously note-sized. Between that
@@ -132,6 +139,63 @@ def _is_smaller_than_body(block, body_size: float) -> bool:
     return block.font_size <= body_size * _QUOTE_MAX_SIZE_RATIO
 
 
+_SMALL_MARKER_RE = re.compile(r"^(?:\d{1,3}|[*†‡§¶#]{1,3})$")
+# A marker set at this share of the text's size or less is a superscript,
+# whether or not the PDF flags it as one.
+_SMALL_MARKER_SIZE_RATIO = 0.8
+
+
+def _span_lines(block: Block) -> list[list]:
+    lines: list[list] = []
+    current: list = []
+    for span in block.spans:
+        current.append(span)
+        if span.line_break_after:
+            lines.append(current)
+            current = []
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _glued_marker(spans: list) -> bool:
+    """A line opening with a small number set hard against its first word."""
+    visible = [s for s in spans if s.text.strip()]
+    if len(visible) < 2 or not _SMALL_MARKER_RE.match(visible[0].text.strip()):
+        return False
+    first, second = visible[0], visible[1]
+    small = first.is_superscript or (
+        second.font_size and first.font_size <= second.font_size * _SMALL_MARKER_SIZE_RATIO
+    )
+    return bool(small)
+
+
+def _opens_with_small_marker(block: Block) -> bool:
+    lines = [ln for ln in _span_lines(block) if any(s.text.strip() for s in ln)]
+    return bool(lines) and _glued_marker(lines[0])
+
+
+def _note_text(block: Block, text: str) -> str:
+    """A note body's text, with a space after each marker set hard against it.
+
+    "¹Kırklareli Üniversitesi" is the note numbered 1, but read as text it is
+    the word "1Kırklareli", and neither the note nor its reference could be
+    matched.
+    """
+    lines = _span_lines(block)
+    if not any(_glued_marker(line) for line in lines):
+        return text
+    rebuilt: list[str] = []
+    for line in lines:
+        visible = [s for s in line if s.text.strip()]
+        if _glued_marker(line):
+            rest = "".join(s.text for s in line[line.index(visible[1]) :])
+            rebuilt.append(f"{visible[0].text.strip()} {rest.lstrip()}")
+        else:
+            rebuilt.append("".join(s.text for s in line))
+    return "\n".join(rebuilt).strip()
+
+
 def _looks_like_footnote_body(
     block: Block, body_size: float, page_has_body_text: bool = True
 ) -> bool:
@@ -150,7 +214,59 @@ def _looks_like_footnote_body(
         return False
     if ratio <= _FOOTNOTE_CLEAR_SIZE_RATIO:
         return True
-    return bool(NOTE_ENTRY_RE.match(block.text.strip()))
+    return bool(NOTE_ENTRY_RE.match(strip_all_sentinels(block.text).strip())) or (
+        _opens_with_small_marker(block)
+    )
+
+
+def _split_at_item_starts(lines: list[str], plain_lines: list[str], starts) -> list[str] | None:
+    """Group a block's lines into items, each opening on a line `starts` accepts.
+
+    Returns None unless the block holds more than one item. Lines that do not
+    open an item are the wrapped continuation of the one above, so an item
+    that runs to two lines is still one item. Requiring every line to carry
+    its own marker left a list whose entries wrap as one long item, its
+    markers buried in the middle of the text.
+    """
+    if not lines or not starts(plain_lines[0], 0):
+        return None
+    items: list[list[str]] = []
+    for index, (line, plain) in enumerate(zip(lines, plain_lines)):
+        if items and not starts(plain, len(items)):
+            items[-1].append(line)
+        else:
+            items.append([line])
+    if len(items) < 2:
+        return None
+    return ["\n".join(item) for item in items]
+
+
+def _note_number(text: str) -> int | None:
+    match = NOTE_ENTRY_RE.match(text)
+    if not match or not match.group(1).isdigit():
+        return None
+    return int(match.group(1))
+
+
+def _split_notes(lines: list[str], plain_lines: list[str]) -> list[str] | None:
+    """Separate notes stacked in one block, each opening with its number.
+
+    A note's own text can wrap onto a line beginning with a number ("2019
+    yılında"), so a line opens a new note only when it carries the next number
+    in sequence after the note above it.
+    """
+    first = _note_number(plain_lines[0]) if plain_lines else None
+    if first is None:
+        if all(NOTE_ENTRY_RE.match(ln) for ln in plain_lines) and len(plain_lines) > 1:
+            return list(lines)
+        return None
+    return _split_at_item_starts(
+        lines, plain_lines, lambda text, count: _note_number(text) == first + count
+    )
+
+
+def _is_list_marker_line(text: str) -> bool:
+    return bool(BULLET_RE.match(text) or NUMBERED_RE.match(text))
 
 
 def classify_blocks(
@@ -171,6 +287,13 @@ def classify_blocks(
         for b in text_blocks
         if b.font_size and body_size and b.font_size >= body_size * _FOOTNOTE_MAX_SIZE_RATIO
     }
+    # Pages carrying text at the body's own size. Note-sized type is enough to
+    # be annotated; a quotation needs real body text to be set apart from.
+    pages_with_body_size_text = {
+        b.page
+        for b in text_blocks
+        if b.font_size and body_size and b.font_size >= body_size * _QUOTE_MAX_SIZE_RATIO
+    }
     line_gap = _typical_line_gap(text_blocks)
     # Page-level context for the heading scorer: a chapter opener typically
     # sits alone on a page that carries far less text than the book's norm.
@@ -179,10 +302,21 @@ def classify_blocks(
     for b in text_blocks:
         page_char_counts[b.page] = page_char_counts.get(b.page, 0) + len(b.text.strip())
         first_content_block.setdefault(b.page, b.block_id)
+    # Where the column's paragraphs start: the left edge of its multi-line
+    # blocks, whose wrapped lines run from the margin. The smallest x on the
+    # page is not the margin -- one diagram label set out in the gutter put it
+    # there, and every paragraph in the book then counted as indented.
+    edges: dict[int, list[float]] = {}
+    for b in text_blocks:
+        if b.text.count("\n") >= 2:
+            edges.setdefault(b.column, []).append(b.bbox[0])
     left_margins: dict[int, float] = {}
     for b in text_blocks:
         key = b.column
         left_margins[key] = min(left_margins.get(key, b.bbox[0]), b.bbox[0])
+    for key, values in edges.items():
+        left_margins[key] = statistics.median(values)
+    toc_pages = toc_module.detect_toc_pages(text_blocks)
 
     nodes: list[StructuralNode] = []
     for i, b in enumerate(ordered_blocks):
@@ -214,7 +348,11 @@ def classify_blocks(
 
         size_ratio = (b.font_size or body_size) / body_size if body_size else 1.0
         text = b.text.strip()
-        first_line = _first_line(text)
+        # Inline emphasis is carried as invisible characters by this point; a
+        # caption whose label is bold ("Şekil 1.") opened with one and every
+        # pattern below, anchored at the start, missed it.
+        plain = strip_all_sentinels(text).strip()
+        first_line = _first_line(plain)
         gap_above = _gap_above(ordered_blocks, i)
         gap_below = _gap_below(ordered_blocks, i)
         indented = b.bbox[0] > left_margins.get(b.column, b.bbox[0]) + max(body_size * 1.2, 8)
@@ -223,6 +361,27 @@ def classify_blocks(
         level = None
         confidence = 0.85
         evidence: list[str] = []
+
+        if b.page in toc_pages:
+            # The contents page's own title is a heading; everything else on
+            # the page is an entry, whatever its type says.
+            is_title = toc_module.is_toc_title(plain)
+            nodes.append(
+                StructuralNode(
+                    node_id=f"n_{b.block_id}",
+                    role=BlockRole.HEADING if is_title else BlockRole.TOC_ENTRY,
+                    text=plain if is_title else toc_module.entry_text(plain),
+                    level=_heading_level(size_ratio) if is_title else None,
+                    confidence=0.8,
+                    source_block_ids=[b.block_id],
+                    bold=b.bold,
+                    italic=b.italic,
+                    page=b.page,
+                    heading_scale=size_ratio if is_title else None,
+                    evidence=["printed-contents"],
+                )
+            )
+            continue
 
         if _looks_like_thematic_break(b):
             nodes.append(
@@ -264,14 +423,16 @@ def classify_blocks(
             # one block. When every line opens with its own marker they are
             # distinct notes, and must be split or they'd all link to whichever
             # marker happened to come first.
+            text = _note_text(b, text)
             raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            if len(raw_lines) > 1 and all(NOTE_ENTRY_RE.match(ln) for ln in raw_lines):
-                for li, line in enumerate(raw_lines):
+            notes = _split_notes(raw_lines, [strip_all_sentinels(ln) for ln in raw_lines])
+            if notes:
+                for li, note in enumerate(notes):
                     nodes.append(
                         StructuralNode(
                             node_id=f"n_{b.block_id}_{li}",
                             role=BlockRole.FOOTNOTE,
-                            text=line,
+                            text=note,
                             confidence=0.7,
                             source_block_ids=[b.block_id],
                             page=b.page,
@@ -287,13 +448,18 @@ def classify_blocks(
             # separate list items, not one item with wrapped continuation
             # lines — split them out now rather than merging them later.
             raw_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-            if len(raw_lines) > 1 and all(BULLET_RE.match(ln) or NUMBERED_RE.match(ln) for ln in raw_lines):
-                for li, line in enumerate(raw_lines):
+            items = _split_at_item_starts(
+                raw_lines,
+                [strip_all_sentinels(ln) for ln in raw_lines],
+                lambda line, _count: _is_list_marker_line(line),
+            )
+            if items:
+                for li, item in enumerate(items):
                     nodes.append(
                         StructuralNode(
                             node_id=f"n_{b.block_id}_{li}",
                             role=BlockRole.LIST_ITEM,
-                            text=line,
+                            text=item,
                             confidence=0.85,
                             source_block_ids=[b.block_id],
                             bold=b.bold,
@@ -307,11 +473,18 @@ def classify_blocks(
         elif looks_like_caption(first_line):
             role = BlockRole.CAPTION
             confidence = 0.8
-        elif indented and (b.italic or _is_smaller_than_body(b, body_size)):
+        elif (
+            indented
+            and (b.italic or _is_smaller_than_body(b, body_size))
+            and b.page in pages_with_body_size_text
+        ):
             # Italics are one way to mark an extract; a smaller measure set
             # in from the margin is just as common and was being flattened
             # into ordinary prose. The footnote test above already claimed
             # small type at the foot of the page, so this cannot steal notes.
+            # An extract is set apart from the text around it: a copyright
+            # page, all small type and centred, has none, and every line of it
+            # had become a quotation.
             role = BlockRole.QUOTE
             confidence = 0.7 if b.italic else 0.6
 
@@ -331,4 +504,60 @@ def classify_blocks(
             )
         )
 
-    return nodes
+    blocks_by_id = {b.block_id: b for b in ordered_blocks}
+    return _merge_caption_continuations(nodes, blocks_by_id)
+
+
+# A caption's second line sits directly beneath its first.
+_CAPTION_LINE_GAP_RATIO = 0.8
+_CAPTION_SIZE_TOLERANCE = 0.6
+_CAPTION_CENTRE_TOLERANCE = 0.1  # fraction of page width
+_MAX_CAPTION_CONTINUATION_LINES = 2
+
+
+def _merge_caption_continuations(
+    nodes: list[StructuralNode], blocks_by_id: dict[str, Block]
+) -> list[StructuralNode]:
+    """Join a caption to the line that finishes it.
+
+    A two-line caption is often set as two blocks, centred one above the
+    other. The second line, short and centred, then read as a quotation of
+    its own beneath the figure: "Şekil 1: 2018 Yılına kadar ..." followed by
+    a block quote reading "enerji kaynakları (Komusanac vd., 2019)".
+    """
+    result: list[StructuralNode] = []
+    for node in nodes:
+        previous = result[-1] if result else None
+        if (
+            previous is not None
+            and previous.role == BlockRole.CAPTION
+            and node.role in (BlockRole.PARAGRAPH, BlockRole.QUOTE)
+            and node.page == previous.page
+            and _continues_caption(previous, node, blocks_by_id)
+        ):
+            previous.text = f"{previous.text}\n{node.text}"
+            previous.source_block_ids.extend(node.source_block_ids)
+            continue
+        result.append(node)
+    return result
+
+
+def _continues_caption(
+    caption: StructuralNode, node: StructuralNode, blocks_by_id: dict[str, Block]
+) -> bool:
+    above = blocks_by_id.get(caption.source_block_ids[-1])
+    below = blocks_by_id.get(node.source_block_ids[0])
+    if above is None or below is None or not above.font_size or not below.font_size:
+        return False
+    if looks_like_caption(_first_line(strip_all_sentinels(node.text))):
+        return False
+    if len([ln for ln in node.text.split("\n") if ln.strip()]) > _MAX_CAPTION_CONTINUATION_LINES:
+        return False
+    if abs(above.font_size - below.font_size) > _CAPTION_SIZE_TOLERANCE:
+        return False
+    gap = below.bbox[1] - above.bbox[3]
+    if gap > max(above.font_size * _CAPTION_LINE_GAP_RATIO, 4.0):
+        return False
+    above_centre = (above.bbox[0] + above.bbox[2]) / 2
+    below_centre = (below.bbox[0] + below.bbox[2]) / 2
+    return abs(above_centre - below_centre) <= below.page_width * _CAPTION_CENTRE_TOLERANCE

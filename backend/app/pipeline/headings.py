@@ -5,10 +5,11 @@ import statistics
 from dataclasses import dataclass
 
 from app.models.document import Block, BlockRole, StructuralNode
+from app.pipeline.footnotes import strip_all_sentinels
 
 # Words that open a division, across the languages this pipeline targets.
 # Matched case-insensitively at the start of a short, isolated line.
-_DIVISION_WORDS = (
+_DIVISION_WORD_LIST = (
     "bölüm", "kısım", "kitap", "fasıl",          # Turkish
     "chapter", "part", "book", "section",         # English
     "kapitel", "teil", "abschnitt",               # German
@@ -17,7 +18,7 @@ _DIVISION_WORDS = (
     "الفصل", "الباب",                              # Arabic
 )
 _DIVISION_RE = re.compile(
-    r"^\s*(?:%s)\b" % "|".join(re.escape(w) for w in _DIVISION_WORDS), re.IGNORECASE
+    r"^\s*(?:%s)\b" % "|".join(re.escape(w) for w in _DIVISION_WORD_LIST), re.IGNORECASE
 )
 # "1", "12.", "IV", "XIV." — a division number standing on its own.
 _BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,3}|[IVXLCDM]{1,7})\s*[.\)]?\s*$", re.IGNORECASE)
@@ -89,7 +90,7 @@ def is_division_heading(text: str) -> bool:
 # "1. Kurban", "Chapter 3 — Beginnings"
 _NUMBERED_TITLE_RE = re.compile(
     r"^\s*(?:(?:%s)\s+)?(\d{1,3}|[IVXLCDM]{1,7})\s*[.\):—–-]\s*\S"
-    % "|".join(re.escape(w) for w in _DIVISION_WORDS),
+    % "|".join(re.escape(w) for w in _DIVISION_WORD_LIST),
     re.IGNORECASE,
 )
 
@@ -137,6 +138,13 @@ _WORDISH_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 # the length at which a title would already have ended.
 _INTERNAL_SENTENCE_RE = re.compile(r"[.?!]\s+[^\s]")
 _PROSE_MIN_CHARS = 40
+# "1.1. ", "2.3.4 ", "IV. " — a heading's own number, whose full stops end no
+# sentence. Left in, every numbered heading past the length limit read as
+# prose: on a 168-page volume that was "1.1. Bilimde Yapay Zekâ: Fırsatlar ve
+# Zorluklar" and every other section title too long to slip under it.
+_LEADING_SECTION_NUMBER_RE = re.compile(
+    r"^\s*(?:\d{1,3}(?:\.\d{1,3})*\.?|[IVXLCDM]{1,7}\.)\s+", re.IGNORECASE
+)
 
 # Score at or above which a block is accepted as a heading, and the score that
 # additionally marks it as a top-level division. Both are deliberately high:
@@ -167,7 +175,15 @@ def _is_centred(block: Block) -> bool:
 
 
 def _text_of(block: Block) -> str:
-    return " ".join(block.text.split())
+    # Inline emphasis and reference markers are planted as invisible
+    # characters before this runs. A heading that opened with a bold run then
+    # began with one, and every pattern anchored at the start missed it.
+    return " ".join(strip_all_sentinels(block.text).split())
+
+
+def _every_span_bold(block: Block) -> bool:
+    visible = [s for s in block.spans if s.text.strip()]
+    return bool(visible) and all(s.bold for s in visible)
 
 
 def score_heading(
@@ -200,7 +216,9 @@ def score_heading(
     # OCR leftovers and prose that happens to be set like a heading.
     if not any(_PRONOUNCEABLE_RE.fullmatch(w) for w in _WORDISH_RE.findall(text)):
         return HeadingEvidence(0.0, signals, False)
-    if len(text) >= _PROSE_MIN_CHARS and _INTERNAL_SENTENCE_RE.search(text):
+    if len(text) >= _PROSE_MIN_CHARS and _INTERNAL_SENTENCE_RE.search(
+        _LEADING_SECTION_NUMBER_RE.sub("", text, count=1)
+    ):
         return HeadingEvidence(0.0, signals, False)
 
     # A heading occupies one line, occasionally two when a long title wraps.
@@ -225,9 +243,29 @@ def score_heading(
     elif size_ratio >= 1.12:
         score += 0.18
         signals.append("slightly-larger-type")
+    whole_line_bold = _every_span_bold(block)
     if block.bold and size_ratio >= 1.02:
         score += 0.14
         signals.append("bold")
+        if whole_line_bold:
+            score += 0.10
+            signals.append("all-bold")
+    elif whole_line_bold:
+        # Bold at the body's own size is how most academic books set their
+        # section headings. Required to be bold throughout, so a paragraph
+        # opening with a bold lead-in does not qualify.
+        score += 0.18
+        signals.append("bold")
+    # A short line set entirely in bold that does not run on into a sentence.
+    # A lead-in label ("Sağlık Hizmetleri:") ends in a colon and is excluded.
+    if (
+        whole_line_bold
+        and len([ln for ln in block.text.split("\n") if ln.strip()]) == 1
+        and len(text.split()) <= 8
+        and not text.endswith((".", ",", ";", ":"))
+    ):
+        score += 0.15
+        signals.append("short-bold-line")
 
     # --- lexical / numbering ---------------------------------------------
     if _DIVISION_RE.match(text):
@@ -252,6 +290,11 @@ def score_heading(
     elif isolated_above:
         score += 0.12
         signals.append("space-above")
+    elif isolated_below:
+        # Space above is often lost to a figure or a blank line MuPDF kept in
+        # the block; the space beneath a heading separates it from its text.
+        score += 0.08
+        signals.append("space-below")
 
     # --- page context -----------------------------------------------------
     if page_char_count and page_char_count < _SPARSE_PAGE_CHARS:
@@ -325,7 +368,7 @@ def _title_lines_after(
             break
         if nxt.role not in (BlockRole.HEADING, BlockRole.PARAGRAPH):
             break
-        text = _text_of_node(nxt)
+        text = _plain_text_of_node(nxt)
         if not text or is_division_label(text) or len(text.split()) > _MAX_HEADING_WORDS:
             break
 
@@ -382,7 +425,7 @@ def merge_division_numbers(
         run = (
             _title_lines_after(nodes, index, blocks_by_id)
             if node.role in (BlockRole.HEADING, BlockRole.PARAGRAPH)
-            and is_division_label(_text_of_node(node))
+            and is_division_label(_plain_text_of_node(node))
             else []
         )
         if run:
@@ -439,6 +482,7 @@ def merge_wrapped_titles(
     while index < len(nodes):
         node = nodes[index]
         text = _text_of_node(node)
+        plain = _plain_text_of_node(node)
         size = _font_size_of(node, blocks_by_id)
         run: list[StructuralNode] = []
 
@@ -447,8 +491,8 @@ def merge_wrapped_titles(
         if (
             node.role is BlockRole.HEADING
             and size is not None
-            and not is_division_heading(text)
-            and not is_division_label(text)
+            and not is_division_heading(plain)
+            and not is_division_label(plain)
         ):
             for nxt in nodes[index + 1 :]:
                 if len(run) >= _MAX_TITLE_BLOCK_LINES:
@@ -457,7 +501,7 @@ def merge_wrapped_titles(
                     break
                 if nxt.bold != node.bold:
                     break
-                nxt_text = _text_of_node(nxt)
+                nxt_text = _plain_text_of_node(nxt)
                 # Anything that numbers or labels itself begins a heading.
                 if (
                     not nxt_text
@@ -489,6 +533,11 @@ def merge_wrapped_titles(
 
 def _text_of_node(node: StructuralNode) -> str:
     return " ".join(node.text.split())
+
+
+def _plain_text_of_node(node: StructuralNode) -> str:
+    """The node's text without the invisible markup characters, for matching."""
+    return " ".join(strip_all_sentinels(node.text).split())
 
 
 def assign_heading_levels(nodes: list[StructuralNode]) -> None:
@@ -531,13 +580,21 @@ def assign_heading_levels(nodes: list[StructuralNode]) -> None:
 
 
 def _apply_numbering_hierarchy(headings: list[StructuralNode]) -> None:
-    """Deepen headings that number themselves as subsections of a chapter.
+    """Place the headings inside each chapter beneath that chapter.
 
     Only applied when the book actually labels divisions, and only ever to push
     a heading *deeper* — never to promote one. Type size still decides what a
     chapter is; the numbering only says what sits underneath it.
+
+    Within a chapter, a section number states its depth relative to the
+    chapter's own top level, which differs from chapter to chapter: one
+    numbers its first sections "1.1", the next "1." with "2.1" beneath. An
+    unnumbered "GİRİŞ" or "KAYNAKÇA" inside a chapter is one of its sections,
+    however close its type is to the chapter title's: left at chapter level,
+    every chapter's introduction and bibliography opened a chapter of its own.
     """
-    divisions = [n for n in headings if is_division_heading(n.text)]
+    plain = {id(n): strip_all_sentinels(n.text) for n in headings}
+    divisions = [n for n in headings if is_division_heading(plain[id(n)])]
     if len(divisions) < 2:
         return
     levels = [n.level for n in divisions if n.level]
@@ -545,23 +602,33 @@ def _apply_numbering_hierarchy(headings: list[StructuralNode]) -> None:
         return
     chapter_level = max(set(levels), key=levels.count)
 
+    # Headings before the first chapter are front matter and keep their level,
+    # except the contents page, which is a division of the front matter
+    # however small its title is set.
+    groups: list[list[StructuralNode]] = []
     for node in headings:
-        depth = section_number_depth(node.text)
-        if depth < 1:
-            continue
-        # A bare "1. GİRİŞ" is a chapter opener in a book that numbers its
-        # chapters, and the first section of one in a book that names them.
-        # This book has already said "BÖLÜM 2", so the plain number is a
-        # section: left at chapter level it put the introduction of two
-        # different chapters into the navigation as chapters of their own.
-        if depth < 2 and not is_division_heading(node.text):
-            proposed = min(6, chapter_level + 1)
-        elif depth < 2:
-            continue
-        else:
-            proposed = min(6, chapter_level + depth - 1)
-        if node.level is None or proposed > node.level:
-            node.level = proposed
+        opens_chapter = (
+            is_division_heading(plain[id(node)])
+            and node.level is not None
+            and node.level <= chapter_level
+        )
+        if opens_chapter:
+            groups.append([])
+        elif groups:
+            groups[-1].append(node)
+        elif "printed-contents" in node.evidence and (node.level or 99) > chapter_level:
+            node.level = chapter_level
+
+    for group in groups:
+        depths = [section_number_depth(plain[id(n)]) for n in group]
+        numbered = [d for d in depths if d]
+        top_depth = min(numbered) if numbered else 1
+        for node, depth in zip(group, depths):
+            if is_division_heading(plain[id(node)]):
+                continue
+            proposed = min(6, chapter_level + 1 + max(0, depth - top_depth))
+            if node.level is None or proposed > node.level:
+                node.level = proposed
 
 
 def typical_line_gap(blocks: list[Block]) -> float:

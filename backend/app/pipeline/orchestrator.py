@@ -23,7 +23,9 @@ from app.models.document import Block, DocumentModel, PageTextKind, StructuralNo
 from app.models.job import Job, JobStage
 from app.pipeline import (
     analyze,
+    bibliography,
     bidi,
+    blocksplit,
     endnotes as endnotes_module,
     enrich,
     extract,
@@ -430,7 +432,7 @@ def _execute_pipeline(job: Job) -> None:
                             settings.conversion_timeout_seconds,
                         )
                         raise OCRTooSlowError()
-            blocks_by_page[i + 1] = page_blocks
+            blocks_by_page[i + 1] = blocksplit.split_blocks(page_blocks)
             if fallback_node is not None:
                 page_fallback_nodes.append(fallback_node)
             _update(job, page=i + 1)
@@ -522,12 +524,21 @@ def _execute_pipeline(job: Job) -> None:
         semantic_tables, table_fallbacks = enrich.apply_tables(
             document, nodes, detected_tables, pages, images_dir
         )
+        # After tables, so a grid of boxes inside a diagram goes with it.
+        composite_figures = enrich.apply_composite_figures(
+            document, nodes, blocks_by_id, pages, images_dir
+        )
+        fitz.TOOLS.store_shrink(100)
+
+        # Reference lists before verse: their ragged, indented lines look
+        # like poetry, and they are split by indentation, not by sentence.
+        bibliography.segment_bibliographies(nodes, blocks_by_id, hyphen_evidence)
 
         # Verse before paragraph merging: its lines end without terminal
         # punctuation, so the merger would otherwise fuse a poem into a single
         # prose paragraph and destroy the line breaks.
         verse_count = verse_module.detect_verse(nodes, blocks_by_id)
-        nodes = paragraphs.reconstruct_paragraphs(nodes, hyphen_evidence)
+        nodes = paragraphs.reconstruct_paragraphs(nodes, hyphen_evidence, blocks_by_id)
 
         # Table detection walks every page's drawings: measured +130 MB here.
         _return_memory_to_os()
@@ -567,7 +578,9 @@ def _execute_pipeline(job: Job) -> None:
         build_result.endnote_count = endnote_count
         build_result.endnote_linked_count = endnotes_linked
         build_result.table_count = semantic_tables
-        build_result.image_fallback_count = table_fallbacks + formula_fallbacks + len(page_fallback_nodes)
+        build_result.image_fallback_count = (
+            table_fallbacks + formula_fallbacks + composite_figures + len(page_fallback_nodes)
+        )
         build_result.formula_count = mathml_count
         build_result.formula_fallback_count = formula_fallbacks
         build_result.unmatched_marker_count = unmatched_markers

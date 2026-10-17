@@ -24,7 +24,15 @@ _MIN_PAGES_FOR_REPETITION = 3
 # 60%-of-all-pages rule detects neither and both get merged into the body text.
 # Repetition is measured within the parity class the block actually appears in.
 _REPETITION_RATIO = 0.55
-_MIN_PARITY_PAGES = 6
+_MIN_PARITY_PAGES = 4
+# "7 | Book Title", "Book Title | 8": a running head carrying its folio. The
+# shape alone identifies it, so a head that repeats on too few pages to be
+# proven by repetition -- a short document, or one page whose head differs --
+# no longer stays in the text, where it ended the paragraph crossing it.
+_FOLIO_HEAD_RE = re.compile(
+    r"^\s*(?:\d{1,4}\s*[|│•·]\s*\S.*|.*\S\s*[|│•·]\s*\d{1,4})\s*$"
+)
+_MAX_FOLIO_HEAD_WORDS = 14
 
 
 def _normalize(text: str) -> str:
@@ -179,6 +187,15 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
                 # title bleed into the body text on all eighty-one verso pages
                 # while the recto form, "Book Title | 103", was stripped
                 # correctly. A footnote at the top of a page is not a thing.
+                continue
+
+            if (
+                _FOLIO_HEAD_RE.match(" ".join(b.text.split()))
+                and len(b.text.split()) <= _MAX_FOLIO_HEAD_WORDS
+                and "\n" not in b.text.strip()
+                and not (body_size and b.font_size and b.font_size > body_size * 1.05)
+            ):
+                furniture[b.block_id] = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
                 continue
 
             key = (_normalize(b.text), band)

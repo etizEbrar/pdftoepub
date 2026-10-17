@@ -22,6 +22,8 @@ TEXT_BEARING_ROLES = {
     BlockRole.ENDNOTE,
     BlockRole.VERSE,
     BlockRole.CAPTION,
+    BlockRole.TOC_ENTRY,
+    BlockRole.BIBLIOGRAPHY_ENTRY,
 }
 
 # Roles that preserve their source content as something other than flowing text

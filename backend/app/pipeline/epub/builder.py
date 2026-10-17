@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 import zipfile
 from dataclasses import dataclass, field
@@ -51,8 +52,22 @@ class BuildResult:
     rtl_block_count: int = 0
 
 
+# Letters with no decomposition to a base letter, which NFKD alone would drop.
+_SLUG_LETTERS = str.maketrans({"ı": "i", "ø": "o", "ß": "ss", "æ": "ae", "œ": "oe", "đ": "d", "ł": "l"})
+# Long enough to say what the book is, short enough for any file system.
+_MAX_SLUG_CHARS = 80
+
+
 def slugify(text: str, fallback: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    # Accented letters keep their base letter. Stripping them outright named
+    # a Turkish book's preface "ns-z" and the book itself "nk.epub".
+    decomposed = unicodedata.normalize(
+        "NFKD", footnotes_module.strip_all_sentinels(text).lower().translate(_SLUG_LETTERS)
+    )
+    ascii_text = "".join(c for c in decomposed if not unicodedata.combining(c))
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")
+    if len(slug) > _MAX_SLUG_CHARS:
+        slug = slug[:_MAX_SLUG_CHARS].rsplit("-", 1)[0]
     return slug or fallback
 
 
@@ -198,13 +213,65 @@ def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
     return chapters
 
 
+def _leading_sentinels(text: str) -> int:
+    """How many invisible markup characters open the text."""
+    index = 0
+    while index < len(text) and text[index] in _INLINE_SENTINELS:
+        index += 1
+    return index
+
+
+_INLINE_SENTINELS = frozenset(footnotes_module.EMPHASIS_SENTINELS)
+
+
 def _list_marker_type(text: str) -> str:
-    return "ol" if NUMBERED_RE.match(text) else "ul"
+    return "ol" if NUMBERED_RE.match(text[_leading_sentinels(text) :]) else "ul"
+
+
+def _list_start(text: str) -> int | None:
+    """The number an ordered item carries, when it is a plain integer."""
+    match = re.match(r"\s*(\d{1,3})[.)]\s", text[_leading_sentinels(text) :])
+    return int(match.group(1)) if match else None
 
 
 def _strip_marker(text: str) -> str:
-    m = BULLET_RE.match(text) or NUMBERED_RE.match(text)
-    return text[m.end() :] if m else text
+    # An item whose marker is set bold opens with an emphasis sentinel, which
+    # hid the marker from the pattern and left "1." printed inside the item.
+    lead = _leading_sentinels(text)
+    rest = text[lead:]
+    m = BULLET_RE.match(rest) or NUMBERED_RE.match(rest)
+    return text[:lead] + rest[m.end() :] if m else text
+
+
+@dataclass
+class _ListItem:
+    content: str
+    introduces_sublist: bool = False
+    children: list[str] = field(default_factory=list)
+    child_type: str | None = None
+
+    def render(self) -> str:
+        if not self.children:
+            return f"<li>{self.content}</li>"
+        inner = "".join(f"<li>{child}</li>" for child in self.children)
+        return f"<li>{self.content}<{self.child_type}>{inner}</{self.child_type}></li>"
+
+
+def _normalised_heading(text: str) -> str:
+    return " ".join(footnotes_module.strip_all_sentinels(text).casefold().split())
+
+
+def _heading_targets(chapters: list[Chapter]) -> dict[str, str]:
+    """Heading text -> its location, for linking the printed contents."""
+    targets: dict[str, str] = {}
+    for ch in chapters:
+        for node in ch.nodes:
+            if node.role == BlockRole.HEADING and node.page is not None:
+                key = _normalised_heading(node.text)
+                # The first occurrence outside the contents page itself.
+                if key and "printed-contents" not in node.evidence:
+                    targets.setdefault(key, f"{ch.filename}#{node.node_id}")
+    return targets
 
 
 def _build_node_chapter_map(chapters: list[Chapter]) -> dict[str, str]:
@@ -296,7 +363,9 @@ def _render_verse(node: StructuralNode, resolve_note_href, dir_attr: str) -> str
     return f'<p class="verse"{dir_attr}>{"".join(lines)}</p>'
 
 
-def _render_image_fallback(node: StructuralNode, images: dict[str, dict]) -> str:
+def _render_image_fallback(
+    node: StructuralNode, images: dict[str, dict], caption: str = ""
+) -> str:
     """A faithful picture of the source region, with a real accessible
     description rather than an empty alt."""
     img = images.get(node.image_ref or "")
@@ -304,10 +373,11 @@ def _render_image_fallback(node: StructuralNode, images: dict[str, dict]) -> str
         return ""
     filename = f"{node.image_ref}.{img['ext']}"
     alt = xml_escape(node.alt_text or "Region of the source document preserved as an image.")
+    figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
     return (
         f'<figure class="preserved-region">'
         f'<img src="../images/{xml_escape(filename)}" alt="{alt}"/>'
-        f"</figure>"
+        f"{figcaption}</figure>"
     )
 
 
@@ -318,8 +388,10 @@ def render_chapter_body(
     images: dict[str, dict],
     base_direction: TextDirection = TextDirection.LTR,
     ref_chapter_map: dict[str, str] | None = None,
+    heading_targets: dict[str, str] | None = None,
 ) -> str:
     ref_chapter_map = ref_chapter_map or {}
+    heading_targets = heading_targets or {}
 
     def resolve_note_href(footnote_node_id: str) -> str:
         target_file = node_chapter_map.get(footnote_node_id)
@@ -334,19 +406,30 @@ def render_chapter_body(
             return f"{target_file}#{ref_id}"
         return f"#{ref_id}"
 
+    def resolve_heading_href(target: str) -> str:
+        filename, _, anchor = target.partition("#")
+        return f"#{anchor}" if filename == current_filename else target
+
     parts: list[str] = []
-    list_buffer: list[str] = []
+    list_buffer: list[_ListItem] = []
     list_type: str | None = None
+    list_start: int | None = None
 
     def flush_list() -> None:
-        nonlocal list_buffer, list_type
+        nonlocal list_buffer, list_type, list_start
         if list_buffer:
-            items = "\n".join(list_buffer)
-            parts.append(f"<{list_type}>\n{items}\n</{list_type}>")
-        list_buffer, list_type = [], None
+            items = "\n".join(item.render() for item in list_buffer)
+            # A list the text interrupts carries on where it left off; without
+            # this "2. Finans" after a run of bullets was numbered 1 again.
+            start = f' start="{list_start}"' if list_type == "ol" and list_start not in (None, 1) else ""
+            parts.append(f"<{list_type}{start}>\n{items}\n</{list_type}>")
+        list_buffer, list_type, list_start = [], None, None
 
-    for node in chapter.nodes:
-        if node.role in EXCLUDED_ROLES:
+    nodes = [n for n in chapter.nodes if n.role not in EXCLUDED_ROLES]
+    paired_captions: set[int] = set()
+
+    for index, node in enumerate(nodes):
+        if index in paired_captions:
             continue
 
         if node.role == BlockRole.IMAGE:
@@ -354,14 +437,29 @@ def render_chapter_body(
             img = images.get(node.image_ref or "")
             if img:
                 filename = f"{node.image_ref}.{img['ext']}"
-                parts.append(f'<figure><img src="../images/{xml_escape(filename)}" alt=""/></figure>')
+                image = f'<img src="../images/{xml_escape(filename)}" alt=""/>'
+                # "Şekil 1. ..." set beneath the figure is its caption, and
+                # belongs inside the figure rather than as a loose paragraph.
+                following = nodes[index + 1] if index + 1 < len(nodes) else None
+                if following is not None and following.role == BlockRole.CAPTION:
+                    paired_captions.add(index + 1)
+                    caption = render_inline(following.text, resolve_note_href)
+                    parts.append(f"<figure>{image}<figcaption>{caption}</figcaption></figure>")
+                else:
+                    parts.append(f"<figure>{image}</figure>")
             continue
 
         if node.role == BlockRole.IMAGE_FALLBACK:
             flush_list()
-            rendered = _render_image_fallback(node, images)
+            following = nodes[index + 1] if index + 1 < len(nodes) else None
+            caption = ""
+            if following is not None and following.role == BlockRole.CAPTION:
+                caption = render_inline(following.text, resolve_note_href)
+            rendered = _render_image_fallback(node, images, caption)
             if rendered:
                 parts.append(rendered)
+                if caption:
+                    paired_captions.add(index + 1)
             continue
 
         if node.role == BlockRole.TABLE:
@@ -392,11 +490,28 @@ def render_chapter_body(
 
         if node.role == BlockRole.LIST_ITEM:
             marker_type = _list_marker_type(node.text)
-            if list_type and marker_type != list_type:
-                flush_list()
-            list_type = marker_type
             content = render_inline(_strip_marker(node.text), resolve_note_href)
-            list_buffer.append(f"<li>{content}</li>")
+            if list_type and marker_type != list_type:
+                # "1. Sağlık Hizmetleri:" introducing its own bullets: the
+                # bullets belong inside that item, not in a list of their own
+                # that restarts the numbering after it.
+                parent = list_buffer[-1]
+                if parent.introduces_sublist and parent.child_type in (None, marker_type):
+                    parent.children.append(content)
+                    parent.child_type = marker_type
+                    continue
+                flush_list()
+            if not list_buffer:
+                list_start = _list_start(node.text)
+            list_type = marker_type
+            list_buffer.append(
+                _ListItem(
+                    content,
+                    introduces_sublist=footnotes_module.strip_all_sentinels(node.text)
+                    .rstrip()
+                    .endswith(":"),
+                )
+            )
             continue
 
         flush_list()
@@ -412,6 +527,17 @@ def render_chapter_body(
         elif node.role == BlockRole.CAPTION:
             content = render_inline(node.text, resolve_note_href)
             parts.append(f'<p class="caption"{dir_attr}>{content}</p>')
+        elif node.role == BlockRole.BIBLIOGRAPHY_ENTRY:
+            content = render_inline(node.text, resolve_note_href)
+            parts.append(f'<p class="bib-entry"{dir_attr}>{content}</p>')
+        elif node.role == BlockRole.TOC_ENTRY:
+            content = render_inline(node.text, resolve_note_href)
+            target = heading_targets.get(_normalised_heading(node.text))
+            if target:
+                content = f'<a href="{xml_escape(resolve_heading_href(target))}">{content}</a>'
+            if node.bold:
+                content = f"<strong>{content}</strong>"
+            parts.append(f'<p class="toc-entry"{dir_attr}>{content}</p>')
         elif node.role == BlockRole.QUOTE:
             content = render_inline(node.text, resolve_note_href)
             parts.append(f"<blockquote{dir_attr}><p>{content}</p></blockquote>")
@@ -678,6 +804,7 @@ def build_epub(
     chapters = split_into_chapters(renderable)
     node_chapter_map = _build_node_chapter_map(chapters)
     ref_chapter_map = _build_ref_chapter_map(chapters)
+    heading_targets = _heading_targets(chapters)
     cover_ref = _find_cover_ref(document)
     identifier = f"urn:uuid:{uuid.uuid4()}"
     lang = language or "en"
@@ -690,7 +817,13 @@ def build_epub(
 
         for ch in chapters:
             body = render_chapter_body(
-                ch, ch.filename, node_chapter_map, document.images, direction, ref_chapter_map
+                ch,
+                ch.filename,
+                node_chapter_map,
+                document.images,
+                direction,
+                ref_chapter_map,
+                heading_targets,
             )
             zf.writestr(
                 f"OEBPS/text/{ch.filename}", _chapter_xhtml(ch.title, body, lang, direction)

@@ -7,6 +7,7 @@ import fitz
 
 from app.core.logging import get_logger
 from app.models.document import Block, TableCell, TableData
+from app.pipeline.footnotes import strip_all_sentinels
 from app.pipeline.hyphenation import HyphenEvidence, join_lines_with_hyphenation_repair
 
 logger = get_logger(__name__)
@@ -57,6 +58,28 @@ def _looks_like_header(row: list[str], body_rows: list[list[str]]) -> bool:
     return header_numeric < 0.34 and body_numeric > header_numeric
 
 
+def _drop_empty_columns(rows: list[list[str]]) -> list[list[str]]:
+    """Remove columns with nothing in any row.
+
+    A grid drawn with doubled rules, or a cell border a hair off the column
+    line, is read as an extra column of nothing: tables came out with a blank
+    column beside every real one.
+    """
+    width = max((len(r) for r in rows), default=0)
+    keep = [c for c in range(width) if any(c < len(r) and r[c].strip() for r in rows)]
+    return [[r[c] if c < len(r) else "" for c in keep] for r in rows]
+
+
+def _caption_row(rows: list[list[str]]) -> str | None:
+    """A first row holding nothing but the table's own "Tablo 1: ..." label."""
+    if not rows:
+        return None
+    filled = [c for c in rows[0] if c.strip()]
+    if len(filled) == 1 and _CAPTION_RE.match(filled[0]):
+        return " ".join(filled[0].split())
+    return None
+
+
 def _score_table(rows: list[list[str]]) -> float:
     """Confidence that this really is a table we can render faithfully.
 
@@ -92,18 +115,23 @@ def _score_table(rows: list[list[str]]) -> float:
     return max(0.0, min(score, 1.0))
 
 
-def _find_caption(page_blocks: list[Block], bbox: tuple[float, float, float, float]) -> str | None:
+def _find_caption(
+    page_blocks: list[Block],
+    bbox: tuple[float, float, float, float],
+    search_below: bool = True,
+) -> str | None:
     """Look just above and just below the table for a 'Table N' style caption."""
     best: tuple[float, str] | None = None
     for block in page_blocks:
         if block.kind != "text" or not block.text.strip():
             continue
-        text = block.text.strip()
+        # A caption whose label is bold opens with an emphasis sentinel.
+        text = strip_all_sentinels(block.text).strip()
         if not _CAPTION_RE.match(text):
             continue
         gap_above = bbox[1] - block.bbox[3]
         gap_below = block.bbox[1] - bbox[3]
-        gap = min(g for g in (abs(gap_above), abs(gap_below)))
+        gap = min(abs(gap_above), abs(gap_below)) if search_below else abs(gap_above)
         if gap <= _CAPTION_SEARCH_GAP_PT and (best is None or gap < best[0]):
             best = (gap, " ".join(text.split()))
     return best[1] if best else None
@@ -148,52 +176,111 @@ def detect_tables_on_page(
             logger.warning("could not extract table %d on page %d", index, page_num)
             continue
 
-        rows = [[_cell_text(c, evidence) for c in row] for row in extracted or []]
-        rows = [r for r in rows if any(c.strip() for c in r)]
-        if len(rows) < 2:
-            continue
+        try:
+            row_boxes = [tuple(float(v) for v in row.bbox) for row in table.rows]
+        except Exception:
+            row_boxes = []
+        if len(row_boxes) != len(extracted or []):
+            row_boxes = []
+        table_bbox = tuple(float(v) for v in table.bbox)  # type: ignore[arg-type]
 
-        confidence = _score_table(rows)
-        # A zero score means the shape is not a table at all, as opposed to a
-        # real table we are unsure we can render. Keeping it would still take
-        # the text it covers out of the prose and hand it to the image
-        # fallback, so a picture of a chapter heading would replace the
-        # heading itself.
-        if confidence <= 0.0:
-            continue
-        col_count = max(len(r) for r in rows)
-        has_header = _looks_like_header(rows[0], rows[1:])
+        indexed = [
+            (i, [_cell_text(c, evidence) for c in row]) for i, row in enumerate(extracted or [])
+        ]
+        indexed = [(i, r) for i, r in indexed if any(c.strip() for c in r)]
 
-        cells: list[TableCell] = []
-        for r_index, row in enumerate(rows):
-            for c_index, value in enumerate(row):
-                cells.append(
-                    TableCell(
-                        text=value,
-                        row=r_index,
-                        col=c_index,
-                        is_header=has_header and r_index == 0,
-                    )
+        # Two tables set one after the other with a "Tablo 2: ..." line
+        # between them share their rules, and are found as one grid with the
+        # columns of both. The caption line is where the second begins.
+        segments: list[tuple[str | None, list[tuple[int, list[str]]]]] = []
+        caption_here: str | None = None
+        current: list[tuple[int, list[str]]] = []
+        for i, row in indexed:
+            caption = _caption_row([row])
+            if caption:
+                if current:
+                    segments.append((caption_here, current))
+                caption_here, current = caption, []
+            else:
+                current.append((i, row))
+        if current:
+            segments.append((caption_here, current))
+
+        for caption_in_grid, segment in segments:
+            if len(segments) > 1 and row_boxes:
+                boxes = [row_boxes[i] for i, _ in segment]
+                bbox = (
+                    min(b[0] for b in boxes),
+                    min(b[1] for b in boxes),
+                    max(b[2] for b in boxes),
+                    max(b[3] for b in boxes),
                 )
-
-        bbox = tuple(float(v) for v in table.bbox)  # type: ignore[arg-type]
-        results.append(
-            DetectedTable(
-                page=page_num,
-                bbox=bbox,
-                data=TableData(
-                    rows=len(rows),
-                    cols=col_count,
-                    cells=cells,
-                    has_header_row=has_header,
-                    caption=_find_caption(page_blocks, bbox),
-                    confidence=confidence,
-                ),
-                covered_block_ids=_blocks_inside(page_blocks, bbox),
+            else:
+                bbox = table_bbox
+            # Where one grid held two tables, the caption between them is the
+            # second one's; the first may only find its own above it.
+            detected = _detected_table(
+                page_num,
+                [r for _, r in segment],
+                bbox,
+                caption_in_grid,
+                page_blocks,
+                search_below=len(segments) == 1,
             )
-        )
+            if detected is not None:
+                results.append(detected)
 
     return results
+
+
+def _detected_table(
+    page_num: int,
+    rows: list[list[str]],
+    bbox: tuple[float, float, float, float],
+    caption_in_grid: str | None,
+    page_blocks: list[Block],
+    search_below: bool = True,
+) -> DetectedTable | None:
+    rows = _drop_empty_columns(rows)
+    if len(rows) < 2:
+        return None
+
+    confidence = _score_table(rows)
+    # A zero score means the shape is not a table at all, as opposed to a
+    # real table we are unsure we can render. Keeping it would still take
+    # the text it covers out of the prose and hand it to the image
+    # fallback, so a picture of a chapter heading would replace the
+    # heading itself.
+    if confidence <= 0.0:
+        return None
+    col_count = max(len(r) for r in rows)
+    has_header = _looks_like_header(rows[0], rows[1:])
+
+    cells: list[TableCell] = []
+    for r_index, row in enumerate(rows):
+        for c_index, value in enumerate(row):
+            cells.append(
+                TableCell(
+                    text=value,
+                    row=r_index,
+                    col=c_index,
+                    is_header=has_header and r_index == 0,
+                )
+            )
+
+    return DetectedTable(
+        page=page_num,
+        bbox=bbox,
+        data=TableData(
+            rows=len(rows),
+            cols=col_count,
+            cells=cells,
+            has_header_row=has_header,
+            caption=caption_in_grid or _find_caption(page_blocks, bbox, search_below),
+            confidence=confidence,
+        ),
+        covered_block_ids=_blocks_inside(page_blocks, bbox),
+    )
 
 
 def mark_continuations(tables: list[DetectedTable]) -> None:

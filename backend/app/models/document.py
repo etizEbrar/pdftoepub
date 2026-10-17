@@ -35,6 +35,11 @@ class BlockRole(str, Enum):
     # A source region preserved verbatim as an image because semantic
     # reconstruction wasn't reliable enough to be safe.
     IMAGE_FALLBACK = "image_fallback"
+    # One line of the book's printed table of contents, without its leader
+    # dots and page number.
+    TOC_ENTRY = "toc_entry"
+    # One reference of a bibliography, however many lines and pages it spans.
+    BIBLIOGRAPHY_ENTRY = "bibliography_entry"
 
 
 class PageTextKind(str, Enum):

@@ -691,7 +691,9 @@ def _judge_split(
 _SUSPICIOUS_PATTERNS = (
     (re.compile(r"[^\W\d_]\d[^\W\d_]"), "digit inside a word"),
     (re.compile(r"[a-zçğıöşü][A-ZÇĞİÖŞÜ][a-zçğıöşü]"), "case flip inside a word"),
-    (re.compile(r"(.)\1{3,}"), "character repeated four or more times"),
+    # Letters only: a row of leader dots or the spaces of a ruled form is
+    # typesetting, not a misread.
+    (re.compile(r"([^\W\d_])\1{3,}"), "character repeated four or more times"),
 )
 
 
@@ -749,7 +751,12 @@ def repair_blocks(blocks: list[Block], enabled: bool = True) -> RepairReport:
 
         text = _repair_words(text, vocab, block.page, block.block_id, report)
         text = _repair_splits(text, vocab, block.page, block.block_id, report)
-        _flag_suspicious(text, block.page, block.block_id, report)
+        # These patterns describe what a scanner gets wrong. On a real text
+        # layer they match "LeCun", "DeepMind" and every ORCID iD, and told the
+        # reader of a born-digital book to check 86 passages for scanning
+        # artefacts that cannot exist.
+        if block.source == "ocr":
+            _flag_suspicious(text, block.page, block.block_id, report)
 
         if text != original:
             block.text = text
