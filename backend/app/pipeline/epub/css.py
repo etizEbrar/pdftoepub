@@ -27,7 +27,13 @@ h4 { font-size: 1.05em; }
 
 p {
   margin: 0 0 1em 0;
-  text-align: justify;
+  /* Ragged right. Justified type on a phone-width column, with no
+     hyphenation dictionary for Turkish in WebKit, stretched the spaces of
+     short lines into gaps a reader saw as broken text. Readers that offer
+     justification still let the reader turn it on. */
+  text-align: left;
+  -webkit-hyphens: auto;
+  hyphens: auto;
   orphans: 2;
   widows: 2;
 }
