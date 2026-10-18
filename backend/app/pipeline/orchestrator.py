@@ -250,6 +250,8 @@ def _extract_page_blocks(
         # Decided against the text that will actually be used for the page: a
         # scan is the page's background whether its words came from the PDF's
         # own text layer or from OCR.
+        if any(images_pipeline.is_page_background(img, text_blocks, page) for img in extracted_images):
+            document.analysis.scanned_text_pages.append(page_num)
         kept = images_pipeline.drop_page_backgrounds(
             page, page_index, extracted_images, text_blocks, images_dir
         )
@@ -492,9 +494,13 @@ def _execute_pipeline(job: Job) -> None:
                 openings_report.numbers,
                 openings_report.inferred_numbers,
             )
-        if settings.ocr_enabled and openings_report.titles:
+        # Only a machine's reading is read again: a born-digital title is
+        # exactly what was typeset, and Tesseract has no business near it.
+        machine_read = set(document.analysis.scanned_text_pages) | set(document.analysis.ocr_pages)
+        scanned_titles = [t for t in openings_report.titles if t.page in machine_read]
+        if settings.ocr_enabled and scanned_titles:
             reread = openers.reread_titles(
-                openings_report.titles,
+                scanned_titles,
                 pages.get,
                 [b for b in text_blocks if b.block_id not in furniture],
                 ocr_languages,

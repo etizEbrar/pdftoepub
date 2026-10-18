@@ -685,7 +685,12 @@ def _token_score(token: str, vocab: DocumentVocabulary) -> int:
 
 
 def _needs_reread(text: str, vocab: DocumentVocabulary) -> bool:
-    return any(_token_score(t, vocab) < 3 for t in text.split() if len(t.strip(_WORD_EDGE_PUNCT)) >= 2)
+    # A chapter's number is not a misread word.
+    return any(
+        _token_score(t, vocab) < 3
+        for t in text.split()
+        if len(t.strip(_WORD_EDGE_PUNCT)) >= 2 and any(c.isalpha() for c in t)
+    )
 
 
 # Glyphs a display face is misread as, and the letters they stand for. Only a

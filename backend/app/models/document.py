@@ -200,6 +200,9 @@ class PDFAnalysis:
     direction: TextDirection = TextDirection.LTR
     ocr_pages: list[int] = field(default_factory=list)
     mean_ocr_confidence: float | None = None
+    # Pages whose text layer lies over an image of the page itself: a scan
+    # carrying its scanner's OCR. Their words are a machine's reading.
+    scanned_text_pages: list[int] = field(default_factory=list)
 
 
 @dataclass
