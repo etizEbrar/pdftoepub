@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -11,7 +12,13 @@ _DIGITS_RE = re.compile(r"\d+")
 # book routinely yields "4 1" for 41 and "1 00" for 100. Requiring \d{1,4} with
 # no internal space let 141 page numbers through on one real book, where they
 # were then misread as footnote bodies and rendered as notes in the EPUB.
-_PAGE_NUMBER_RE = re.compile(r"^[\-–—\s]*\d[\d\s]{0,5}[\-–—\s]*$")
+#
+# Printers also dress the folio up -- "• 12 •", "- 7 -", ". 9 ." -- and OCR reads
+# those ornaments as whatever mark is nearest: "• 12-", "280*", "•2 1 •". On a
+# real novel every one of them reached the EPUB, most as a bulleted list item
+# glued to the first line of the next page.
+_FOLIO_ORNAMENT = r"[\-–—•·∙*.,:;'\"`´^~_|°‹›<>«»()\[\]\s]"
+_PAGE_NUMBER_RE = re.compile(rf"^{_FOLIO_ORNAMENT}*\d[\d\s]{{0,5}}{_FOLIO_ORNAMENT}*$")
 # A note body opens with its marker and then real prose. Running footers never
 # look like this, so the pattern reliably separates the two.
 _NOTE_BODY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S+")
@@ -36,7 +43,10 @@ _MAX_FOLIO_HEAD_WORDS = 14
 
 
 def _normalize(text: str) -> str:
-    return _DIGITS_RE.sub("#", " ".join(text.split())).strip().lower()
+    # Spaces are dropped, not collapsed. A running head set letter-spaced comes
+    # out of OCR with the gaps in a different place on every page -- "ÇEKEN",
+    # "ÇEK EN", "Ç E K E N" -- and compared word by word no two pages agreed.
+    return _DIGITS_RE.sub("#", "".join(text.split())).lower()
 
 
 def _looks_like_note_body(text: str) -> bool:
@@ -170,7 +180,11 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
             if band is None:
                 continue
 
-            if _PAGE_NUMBER_RE.match(b.text.strip()) and not _is_display_type(b, body_size):
+            # The display-type guard protects a chapter number above its title;
+            # in the bottom margin the large type is an ornament's, not a digit's.
+            if _PAGE_NUMBER_RE.match(b.text.strip()) and (
+                band == "bottom" or not _is_display_type(b, body_size)
+            ):
                 furniture[b.block_id] = BlockRole.PAGE_NUMBER
                 confirmed_page_numbers.append(b)
                 continue
@@ -212,10 +226,55 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
             for b in candidates[key]:
                 furniture[b.block_id] = role
 
+    _remove_misread_running_heads(candidates, furniture, body_size)
     _remove_mangled_page_numbers(
         blocks_by_page, furniture, confirmed_page_numbers, body_size
     )
     return furniture
+
+
+# How close a margin line must come to a proven running head to be one of its
+# misreadings. "FREDRIGK BACKMAN" against "FREDRICKBACKMAN" scores 0.9; unrelated
+# short lines of prose score well under 0.6.
+_MISREAD_HEAD_SIMILARITY = 0.8
+_MIN_HEAD_KEY_CHARS = 6
+
+
+def _remove_misread_running_heads(
+    candidates: dict[tuple[str, str], list[Block]],
+    furniture: dict[str, BlockRole],
+    body_size: float,
+) -> None:
+    """Catch running heads that OCR read differently on a page or two.
+
+    Repetition proves the head on most pages, but a scan misreads it now and
+    then -- "FREDRIGK BACKMAN" for "FREDRIK BACKMAN" -- and each misreading is
+    unique, so it never repeats and was left in the text as a stray blockquote.
+    A single line in the same margin, in type no larger than the body, that
+    reads almost exactly like a proven head is that head.
+    """
+    proven: dict[str, list[str]] = defaultdict(list)
+    for (key, band), blocks in candidates.items():
+        if len(key) >= _MIN_HEAD_KEY_CHARS and all(b.block_id in furniture for b in blocks):
+            proven[band].append(key)
+    if not proven:
+        return
+    for (key, band), blocks in candidates.items():
+        if not proven.get(band) or len(key) < _MIN_HEAD_KEY_CHARS:
+            continue
+        if all(b.block_id in furniture for b in blocks):
+            continue
+        if not any(
+            difflib.SequenceMatcher(None, key, head).ratio() >= _MISREAD_HEAD_SIMILARITY
+            for head in proven[band]
+        ):
+            continue
+        for b in blocks:
+            if "\n" in b.text.strip():
+                continue
+            if body_size and b.font_size and b.font_size > body_size * 1.05:
+                continue
+            furniture[b.block_id] = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
 
 
 def _remove_mangled_page_numbers(

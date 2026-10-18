@@ -58,6 +58,7 @@ def rasterize_region(
     images_dir: Path,
     ref: str,
     padding: float = _REGION_PADDING_PT,
+    photo: bool = False,
 ) -> RasterizedRegion | None:
     """Render one region of a page to a high-resolution PNG.
 
@@ -92,8 +93,14 @@ def rasterize_region(
         return None
 
     images_dir.mkdir(parents=True, exist_ok=True)
-    out_path = images_dir / f"{ref}.png"
-    pix.save(str(out_path))
+    if photo:
+        # A scanned page or a photograph: PNG kept a book's cover at 2.9 MB,
+        # where JPEG holds it at a tenth of that with no visible difference.
+        out_path = images_dir / f"{ref}.jpg"
+        pix.save(str(out_path), output="jpg", jpg_quality=85)
+    else:
+        out_path = images_dir / f"{ref}.png"
+        pix.save(str(out_path))
 
     return RasterizedRegion(
         ref=ref,

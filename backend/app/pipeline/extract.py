@@ -213,6 +213,9 @@ def _dominant_span(spans: list[Span]) -> Span | None:
     return max(spans, key=lambda s: len(s.text))
 
 
+_EPUB_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
+
+
 def extract_images(page: fitz.Page, page_index: int, images_dir: Path) -> list[dict]:
     """Extract raster images on the page as files, preserving their page position."""
     page_num = page_index + 1
@@ -225,6 +228,16 @@ def extract_images(page: fitz.Page, page_index: int, images_dir: Path) -> list[d
         if not image_bytes:
             continue
         ext = raw_block.get("ext", "png")
+        if ext not in _EPUB_IMAGE_EXTENSIONS:
+            # JPEG 2000, JBIG2, TIFF: none of them is an EPUB core media type,
+            # and a reader shows nothing for them.
+            try:
+                pix = fitz.Pixmap(image_bytes)
+                if pix.colorspace is None or pix.colorspace.n not in (1, 3):
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                image_bytes, ext = pix.tobytes("png"), "png"
+            except Exception:
+                continue
         ref = f"p{page_num}_img{bi:03d}"
         out_path = images_dir / f"{ref}.{ext}"
         out_path.write_bytes(image_bytes)

@@ -9,6 +9,10 @@ from app.pipeline.hyphenation import HyphenEvidence, join_lines_with_hyphenation
 from app.pipeline.structure import BULLET_RE, NUMBERED_RE, TERMINAL_PUNCT
 
 
+_CLOSING_QUOTES = "”’\"'»"
+_CLAUSE_PUNCT = ",;:"
+
+
 @dataclass
 class _Geometry:
     """Where a paragraph's last line ends and the next block's first begins."""
@@ -17,6 +21,8 @@ class _Geometry:
     next_indented: bool
     crosses_boundary: bool
     uses_indents: bool
+    # The space between the two lines, in type sizes; None across a boundary.
+    gap: float | None = None
 
 
 def _continues(
@@ -40,7 +46,12 @@ def _continues(
     if not prev_stripped or not next_stripped:
         return False, 0.0
     reinforced = next_stripped[0].islower()
-    ends_sentence = prev_stripped[-1] in TERMINAL_PUNCT
+    # A closing quotation mark ends a sentence only when what it closes did:
+    # "...döşeyeceğim,” / dedi sükûnetini bozmadan." is one sentence.
+    unquoted = prev_stripped.rstrip(_CLOSING_QUOTES)
+    ends_sentence = prev_stripped[-1] in TERMINAL_PUNCT and not (
+        unquoted and unquoted != prev_stripped and unquoted[-1] in _CLAUSE_PUNCT
+    )
 
     if geometry is None:
         if ends_sentence:
@@ -53,6 +64,29 @@ def _continues(
         # unindented one is the same paragraph carrying on.
         if (
             geometry.crosses_boundary
+            and geometry.uses_indents
+            and geometry.last_line_full
+            and not geometry.next_indented
+        ):
+            return True, 0.75
+        # The same inside a page whose text layer made every printed line a
+        # block of its own, as a scanner's does: a sentence ending on a full
+        # line, and the next line at the margin with no extra space above it,
+        # is the paragraph carrying on. Space above means a section break.
+        if (
+            geometry.uses_indents
+            and geometry.last_line_full
+            and not geometry.next_indented
+            and geometry.gap is not None
+            and geometry.gap <= _LINE_SPACE_RATIO
+        ):
+            return True, 0.75
+        # Dialogue: "...ne?” / diye sordu Parvaneh." The question closed, the
+        # sentence did not -- a full line, then a lowercase one at the margin.
+        # A scanner's text layer gives every line a block of its own, so this
+        # is decided here for every line of a novel's dialogue.
+        if (
+            reinforced
             and geometry.uses_indents
             and geometry.last_line_full
             and not geometry.next_indented
@@ -94,6 +128,9 @@ _INDENT_SIZE_RATIO = 0.8
 # Share of a book's multi-line paragraphs that must open indented before an
 # unindented line is evidence of a continuation.
 _INDENTED_STYLE_SHARE = 0.5
+# Ordinary leading between two lines of a paragraph, in type sizes. A blank
+# line between them is a type size or more.
+_LINE_SPACE_RATIO = 0.9
 
 
 class _Layout:
@@ -154,11 +191,13 @@ class _Layout:
         next_left, _ = next_measure
         size = nxt.font_size or 10.0
         next_indented = next_boxes[0].x0 > next_left + size * _INDENT_SIZE_RATIO
+        crosses = prev.page != nxt.page or prev.column != nxt.column
         return _Geometry(
             last_line_full=last_line_full,
             next_indented=next_indented,
-            crosses_boundary=prev.page != nxt.page or prev.column != nxt.column,
+            crosses_boundary=crosses,
             uses_indents=self.uses_indents,
+            gap=None if crosses else (nxt.bbox[1] - prev.bbox[3]) / size,
         )
 
 

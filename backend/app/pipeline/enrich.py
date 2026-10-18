@@ -22,14 +22,15 @@ def _register_fallback_image(
     bbox: tuple[float, float, float, float],
     images_dir: Path,
     ref: str,
+    photo: bool = False,
 ) -> str | None:
-    region = rasterize_region(page, bbox, images_dir, ref)
+    region = rasterize_region(page, bbox, images_dir, ref, photo=photo)
     if region is None:
         return None
     document.images[region.ref] = {
         "ref": region.ref,
         "path": str(region.path),
-        "ext": "png",
+        "ext": region.path.suffix.lstrip("."),
         "page": region.page,
         "bbox": list(region.bbox),
         "is_fallback": True,
@@ -479,7 +480,7 @@ def preserve_page_as_image(
 ) -> StructuralNode | None:
     """Whole-page fallback for a scanned page OCR couldn't read confidently."""
     ref = _register_fallback_image(
-        document, page, tuple(page.rect), images_dir, f"page_{page_number}_fallback"
+        document, page, tuple(page.rect), images_dir, f"page_{page_number}_fallback", photo=True
     )
     if ref is None:
         return None

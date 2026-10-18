@@ -96,6 +96,9 @@ _NUMBERED_TITLE_RE = re.compile(
 
 _MAX_HEADING_CHARS = 120
 _MAX_HEADING_LINES = 2  # a long title may wrap once; more than that is body text
+_MAX_DISPLAY_HEADING_LINES = 4
+_MAX_DISPLAY_HEADING_WORDS = 18
+_DISPLAY_HEADING_RATIO = 1.5
 _MAX_HEADING_WORDS = 12  # headings are terse; a longer line is a sentence
 _CENTRED_TOLERANCE = 0.06  # fraction of page width
 _SPARSE_PAGE_CHARS = 900
@@ -226,12 +229,17 @@ def score_heading(
     # its own number is a list, which "1. Title" numbering would otherwise make
     # look exactly like a numbered heading.
     source_lines = [ln for ln in block.text.split("\n") if ln.strip()]
-    if len(source_lines) > _MAX_HEADING_LINES:
+    size_ratio = (block.font_size or body_size) / body_size if body_size else 1.0
+    # A chapter title in display type runs to three or four short lines as a
+    # matter of design: "OVE DENEN ADAM / VE MERDİVENDEN DÜŞMEDEN / BİR PENCERE
+    # BİLE AÇMAYI / BAŞARAMAYAN ...". Held to two, a novel lost a third of its
+    # chapters to the paragraph that followed.
+    max_lines = _MAX_DISPLAY_HEADING_LINES if size_ratio >= _DISPLAY_HEADING_RATIO else _MAX_HEADING_LINES
+    if len(source_lines) > max_lines:
         return HeadingEvidence(0.0, signals, False)
     if len(source_lines) > 1 and all(_ITEM_NUMBER_RE.match(ln.strip()) for ln in source_lines):
         return HeadingEvidence(0.0, signals, False)
 
-    size_ratio = (block.font_size or body_size) / body_size if body_size else 1.0
 
     # --- typography -------------------------------------------------------
     if size_ratio >= 1.8:
@@ -313,7 +321,9 @@ def score_heading(
             signals.append("ends-like-prose")
 
     # Headings are terse. A long line is a sentence that happens to be set apart.
-    if len(text.split()) > _MAX_HEADING_WORDS and "division-word" not in signals:
+    # A display title over several lines is allowed the words to fill them.
+    max_words = _MAX_DISPLAY_HEADING_WORDS if size_ratio >= _DISPLAY_HEADING_RATIO else _MAX_HEADING_WORDS
+    if len(text.split()) > max_words and "division-word" not in signals:
         score -= 0.25
         signals.append("too-wordy")
 

@@ -33,6 +33,7 @@ from app.pipeline import (
     headers_footers,
     headings as headings_module,
     hyphenation,
+    openers,
     paragraphs,
     reading_order,
     structure,
@@ -244,14 +245,20 @@ def _extract_page_blocks(
     native_blocks = extract.extract_page_blocks(page, page_index)
 
     extracted_images = extract.extract_images(page, page_index, images_dir)
-    for img in extracted_images:
-        document.images[img["ref"]] = img
-    image_blocks = images_pipeline.to_image_blocks(
-        extracted_images, page.rect.width, page.rect.height
-    )
+
+    def page_images(text_blocks: list[Block]) -> list[Block]:
+        # Decided against the text that will actually be used for the page: a
+        # scan is the page's background whether its words came from the PDF's
+        # own text layer or from OCR.
+        kept = images_pipeline.drop_page_backgrounds(
+            page, page_index, extracted_images, text_blocks, images_dir
+        )
+        for img in kept:
+            document.images[img["ref"]] = img
+        return images_pipeline.to_image_blocks(kept, page.rect.width, page.rect.height)
 
     if kind == PageTextKind.NATIVE or kind == PageTextKind.EMPTY:
-        return native_blocks + image_blocks, None
+        return native_blocks + page_images(native_blocks), None
 
     if client_page is not None:
         # The client read this page on its own hardware. Trusted for the words
@@ -265,7 +272,7 @@ def _extract_page_blocks(
         # convert a scan a phone has already read.
         outcome = blocks_from_client_page(client_page, page.rect.width, page.rect.height)
     elif not settings.ocr_enabled:
-        return native_blocks + image_blocks, None
+        return native_blocks + page_images(native_blocks), None
     else:
         outcome = ocr_page(page, page_index, languages=ocr_languages)
     document.analysis.ocr_pages.append(page_num)
@@ -277,7 +284,7 @@ def _extract_page_blocks(
                 f"page {page_num}: OCR confidence {outcome.mean_confidence:.0f} too low; "
                 "kept native text only"
             )
-            return native_blocks + image_blocks, None
+            return native_blocks + page_images(native_blocks), None
         fallback = enrich.preserve_page_as_image(
             document,
             page,
@@ -293,12 +300,12 @@ def _extract_page_blocks(
 
     if kind == PageTextKind.SCANNED:
         # No trustworthy text layer: OCR is the only source.
-        return outcome.blocks + image_blocks, None
+        return outcome.blocks + page_images(outcome.blocks), None
 
     # MIXED: native text is authoritative; add OCR only for regions the native
     # layer doesn't already cover, so nothing gets duplicated.
     merged = native_blocks + _ocr_blocks_outside_native(outcome.blocks, native_blocks)
-    return merged + image_blocks, None
+    return merged + page_images(merged), None
 
 
 def _ocr_blocks_outside_native(
@@ -465,6 +472,36 @@ def _execute_pipeline(job: Job) -> None:
         furniture = headers_footers.detect_furniture(blocks_by_page)
 
         body_size = structure.body_font_size(text_blocks)
+        # Before anything reads words or structure from the blocks: a drop cap
+        # cut from its word, or an ornament read as letters, would otherwise be
+        # taken for a paragraph, a list bullet or a heading of its own.
+        absorbed, openings_report = openers.repair_openings(blocks_by_page, furniture, body_size)
+        if absorbed:
+            for page_num, page_blocks in blocks_by_page.items():
+                blocks_by_page[page_num] = [b for b in page_blocks if b.block_id not in absorbed]
+            all_blocks = [b for b in all_blocks if b.block_id not in absorbed]
+            document.blocks = all_blocks
+            text_blocks = [b for b in text_blocks if b.block_id not in absorbed]
+            ordered_blocks = [b for b in ordered_blocks if b.block_id not in absorbed]
+            logger.info(
+                "job %s: chapter openings: %d drop caps rejoined, %d ornaments dropped, "
+                "%d numbers set (%d inferred)",
+                job.job_id,
+                openings_report.drop_caps,
+                openings_report.ornaments,
+                openings_report.numbers,
+                openings_report.inferred_numbers,
+            )
+        if settings.ocr_enabled and openings_report.titles:
+            reread = openers.reread_titles(
+                openings_report.titles,
+                pages.get,
+                [b for b in text_blocks if b.block_id not in furniture],
+                ocr_languages,
+                images_dir.parent / "titles",
+            )
+            if reread:
+                logger.info("job %s: corrected %d words in chapter titles", job.job_id, reread)
         content_blocks = [b for b in text_blocks if b.block_id not in furniture]
         # Two passes: find which note numbers actually exist on each page, then
         # use that as the evidence gate when recovering reference markers that

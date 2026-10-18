@@ -127,6 +127,29 @@ _FOOTNOTE_MAX_SIZE_RATIO = 0.90
 _FOOTNOTE_PAGE_FRACTION = 0.66
 
 
+def _first_line_of_paragraph(
+    ordered: list[Block], index: int, left_margins: dict[int, float], body_size: float
+) -> bool:
+    """A lone indented line with the next line back at the margin.
+
+    That is a paragraph's indented first line, not an extract: a quotation is
+    set in on every line. A scanner's text layer makes each printed line a
+    block of its own, so the first line of a paragraph arrives alone, indented
+    -- and with type a fraction of a point smaller, a whole paragraph was cut
+    in two and its first line set as a quotation.
+    """
+    block = ordered[index]
+    if "\n" in block.text.strip():
+        return False
+    following = next(
+        (b for b in ordered[index + 1 :] if b.kind == "text" and b.text.strip()), None
+    )
+    if following is None or following.page != block.page or following.column != block.column:
+        return False
+    margin = left_margins.get(block.column, following.bbox[0])
+    return following.bbox[0] <= margin + max(body_size * 0.5, 3.0)
+
+
 def _is_smaller_than_body(block, body_size: float) -> bool:
     """Set noticeably smaller than the body text.
 
@@ -477,6 +500,7 @@ def classify_blocks(
             indented
             and (b.italic or _is_smaller_than_body(b, body_size))
             and b.page in pages_with_body_size_text
+            and not _first_line_of_paragraph(ordered_blocks, i, left_margins, body_size)
         ):
             # Italics are one way to mark an extract; a smaller measure set
             # in from the margin is just as common and was being flattened

@@ -134,6 +134,31 @@ def _choose_split_level(nodes: list[StructuralNode]) -> int | None:
     return fallback if fallback is not None else min(counts)
 
 
+def _raise_chapter_headings(chapters: list[Chapter]) -> None:
+    """Make the heading that opens each chapter file its <h1>.
+
+    Levels come from type sizes across the whole book, so a title page set
+    larger than any chapter took h1 and h2, and a novel's thirty-nine chapters
+    opened with an <h3> -- set by the reader in small type, as a minor heading.
+    Each file is its own document: what opens it is its top heading, and the
+    headings beneath keep their distance from it.
+    """
+    openers = [
+        ch.nodes[0].level
+        for ch in chapters
+        if ch.nodes and ch.nodes[0].role == _HEADING_SPLIT_ROLE and ch.nodes[0].level
+    ]
+    if not openers:
+        return
+    shift = max(set(openers), key=openers.count) - 1
+    if shift <= 0:
+        return
+    for chapter in chapters:
+        for node in chapter.nodes:
+            if node.role in (BlockRole.HEADING, BlockRole.ENDNOTE_SECTION_HEADING) and node.level:
+                node.level = max(1, node.level - shift)
+
+
 def split_into_chapters(nodes: list[StructuralNode]) -> list[Chapter]:
     """Split by detected document structure, not PDF pages (spec section 30).
 
@@ -777,7 +802,12 @@ def _find_cover_ref(document: DocumentModel) -> str | None:
             page_area = b.page_width * b.page_height
             break
     for node in document.nodes:
-        if node.role != BlockRole.IMAGE or node.page != 1 or not node.image_ref:
+        if node.page != 1 or not node.image_ref:
+            continue
+        if node.role == BlockRole.IMAGE_FALLBACK and node.node_id == "pagefallback_1":
+            # A scanned cover with no text to read is kept as the whole page.
+            return node.image_ref
+        if node.role != BlockRole.IMAGE:
             continue
         img = document.images.get(node.image_ref)
         if not img or not page_area:
@@ -802,6 +832,7 @@ def build_epub(
     XHTML — no absolute positioning or PDF-page-shaped fixed layouts."""
     renderable = [n for n in document.nodes if n.role not in EXCLUDED_ROLES]
     chapters = split_into_chapters(renderable)
+    _raise_chapter_headings(chapters)
     node_chapter_map = _build_node_chapter_map(chapters)
     ref_chapter_map = _build_ref_chapter_map(chapters)
     heading_targets = _heading_targets(chapters)

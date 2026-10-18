@@ -148,6 +148,10 @@ class DocumentVocabulary:
     def frequency(self, word: str) -> int:
         return self._freq.get(fold(word), 0)
 
+    def words(self) -> list[tuple[str, int]]:
+        """Every folded word of the document with its frequency."""
+        return list(self._freq.items())
+
     def is_canonical(self, word: str) -> bool:
         return self.frequency(word) >= MIN_CANONICAL_FREQUENCY
 
@@ -334,6 +338,10 @@ _SPACE_BEFORE_PERIOD = re.compile(r"(?<=[^\s.])\s+\.(?!\s*\.)")
 # "sevgim .Yılmaz" -> a full stop with no space after it, mid-sentence.
 _MISSING_SPACE_AFTER = re.compile(r"([,;:])(?=[^\W\d_])")
 _REPEATED_PUNCT = re.compile(r"([,;:!?])\1{1,}")
+# A curly quotation mark says which way it faces, so a space on its inner side
+# is a scanner's, never the author's: "“ Öğle yemeği!" and "dedi ”".
+_SPACE_INSIDE_OPENING_QUOTE = re.compile(r"([“‘])[ \t]+(?=[^\W_])")
+_SPACE_INSIDE_CLOSING_QUOTE = re.compile(r"(?<=[^\W_.,!?…])[ \t]+(”)|(?<=[.,!?…])[ \t]+(”)(?=\s|$)")
 # "?.." and "!.." — a terminal mark followed by exactly two dots. No typographic
 # convention produces this; it is an ellipsis that lost a dot on the way out of
 # the PDF. Completed to the three-dot form on instruction.
@@ -409,6 +417,10 @@ def _normalise_text(text: str) -> tuple[str, list[tuple[CorrectionKind, str, str
          "added missing space after punctuation")
     note(_REPEATED_PUNCT, r"\1", CorrectionKind.REPEATED_PUNCTUATION,
          "collapsed repeated punctuation")
+    note(_SPACE_INSIDE_OPENING_QUOTE, r"\1", CorrectionKind.PUNCTUATION_SPACING,
+         "removed space inside an opening quotation mark")
+    note(_SPACE_INSIDE_CLOSING_QUOTE, "”", CorrectionKind.PUNCTUATION_SPACING,
+         "removed space inside a closing quotation mark")
     return text, changes
 
 

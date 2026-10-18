@@ -64,6 +64,10 @@ _BARE_NUMBER_LINE_RE = re.compile(r"^\s*[\(\[]?\d{1,4}[\.\)\]]?\s*$")
 _MAX_LINE_GAP_FACTOR = 1.9
 _STANZA_GAP_FACTOR = 1.35
 _INDENT_STEP_PT = 9.0
+# A line ending this close to the column's right edge fills the measure; one
+# starting this close to the left edge starts at the margin.
+_FULL_MEASURE_TOLERANCE = 0.06
+_AT_MARGIN_TOLERANCE = 0.03
 _SENTENCE_END = ".!?:;\"'”’»)"
 
 _CANDIDATE_ROLES = {BlockRole.PARAGRAPH, BlockRole.QUOTE}
@@ -91,6 +95,21 @@ def _block_lines(block: Block) -> list[tuple[float, float, str]]:
     return [line for line in lines if line[2]]
 
 
+def _column_extent(blocks: list[Block]) -> tuple[float, float] | None:
+    """The left margin and right edge of a column's text, from its lines."""
+    starts: list[float] = []
+    ends: list[float] = []
+    for block in blocks:
+        if block.kind != "text" or not block.text.strip():
+            continue
+        for x0, x1, _ in _block_lines(block):
+            starts.append(x0)
+            ends.append(x1)
+    if not starts:
+        return None
+    return min(starts), max(ends)
+
+
 def _column_text_width(blocks: list[Block]) -> float:
     """The width of a full prose *line* in this column — the yardstick a verse
     line must fall short of.
@@ -108,12 +127,38 @@ def _column_text_width(blocks: list[Block]) -> float:
     return widest
 
 
+def _wraps_like_prose(
+    lines: list[tuple[float, float, str]], column: tuple[float, float] | None
+) -> bool:
+    """A line filling the measure followed by one at the margin is prose wrapping.
+
+    A scanner's text layer gives every printed line a block of its own, so a
+    page of dialogue arrives as a run of short single lines -- ragged, short,
+    unpunctuated at the turn -- and read as a poem. What a poem does not do is
+    run a line to the right margin and carry on at the left one.
+    """
+    if column is None:
+        return False
+    left, right = column
+    width = right - left
+    if width <= 0:
+        return False
+    for (_, end, _), (start, _, _) in zip(lines, lines[1:]):
+        if end >= right - width * _FULL_MEASURE_TOLERANCE and start <= left + width * _AT_MARGIN_TOLERANCE:
+            return True
+    return False
+
+
 def _looks_like_verse_run(
-    lines: list[tuple[float, float, str]], reference_width: float
+    lines: list[tuple[float, float, str]],
+    reference_width: float,
+    column: tuple[float, float] | None = None,
 ) -> tuple[bool, float]:
     """Judge a candidate run of lines. Requires several independent signals so
     ordinary prose is never converted into poetry."""
     if len(lines) < _MIN_VERSE_LINES or reference_width <= 0:
+        return False, 0.0
+    if _wraps_like_prose(lines, column):
         return False, 0.0
 
     widths = [x1 - x0 for x0, x1, _ in lines]
@@ -229,6 +274,7 @@ def detect_verse(nodes: list[StructuralNode], blocks_by_id: dict[str, Block]) ->
         key: _column_text_width(column_blocks)
         for key, column_blocks in blocks_by_column.items()
     }
+    extents = {key: _column_extent(column_blocks) for key, column_blocks in blocks_by_column.items()}
 
     result: list[StructuralNode] = []
     converted = 0
@@ -279,7 +325,9 @@ def detect_verse(nodes: list[StructuralNode], blocks_by_id: dict[str, Block]) ->
             lines.extend(_block_lines(run_block))
 
         is_verse, confidence = _looks_like_verse_run(
-            lines, reference_width.get((block.page, block.column), 0.0)
+            lines,
+            reference_width.get((block.page, block.column), 0.0),
+            extents.get((block.page, block.column)),
         )
         if not is_verse:
             result.append(node)

@@ -70,8 +70,9 @@ def _guess_language(sample_text: str) -> str | None:
 # English, and the whole book was declared English because of it.
 _LANGUAGE_SAMPLE_PAGES = 8
 # Pages searched for the title when the PDF's own metadata cannot be trusted.
-_TITLE_SEARCH_PAGES = 3
+_TITLE_SEARCH_PAGES = 6
 _MAX_TITLE_CHARS = 200
+_TITLE_RIVAL_SIZE = 0.8
 # Metadata a word processor or scanner fills in on its own.
 _BOILERPLATE_TITLE_RE = re.compile(
     r"^(untitled|document\d*|microsoft (word|powerpoint)\b.*|.*\.(docx?|pdf|indd|tex|odt))$",
@@ -104,8 +105,9 @@ def _metadata_title_is_plausible(title: str, opening_text: str) -> bool:
     return present / len(words) >= 0.6
 
 
-def _title_from_pages(doc: fitz.Document) -> str | None:
-    """The largest type on the first pages that carry text: the title page."""
+def _title_candidates(doc: fitz.Document) -> list[tuple[int, str, float]]:
+    """The largest type on each opening page that sets something as a title."""
+    found: list[tuple[int, str, float]] = []
     for page_index in range(min(_TITLE_SEARCH_PAGES, doc.page_count)):
         spans = []
         for block in doc[page_index].get_text("dict").get("blocks", []):
@@ -127,8 +129,43 @@ def _title_from_pages(doc: fitz.Document) -> str | None:
         )
         title = " ".join(" ".join(text for _, _, text in title_spans).split())
         if 3 <= len(title) <= _MAX_TITLE_CHARS:
-            return title
-    return None
+            found.append((page_index, title, largest))
+    return found
+
+
+def _title_from_pages(doc: fitz.Document) -> str | None:
+    """The book's title, from the opening pages that print it.
+
+    A book prints its title more than once -- half-title, title page, the
+    copyright page -- and a scan may misread any one of them: this novel's
+    half-title came through as "KAVATA ROVEŞATA ÇFKFN ADAM", and that became
+    its name in every reader's library. The candidate whose words the other
+    opening pages repeat is the one that was read right.
+    """
+    candidates = _title_candidates(doc)
+    if not candidates:
+        return None
+    pages_text = {
+        index: set(_folded(doc[index].get_text("text")).split())
+        for index in range(min(_TITLE_SEARCH_PAGES + 2, doc.page_count))
+    }
+
+    def attestation(candidate: tuple[int, str, float]) -> float:
+        page_index, title, _ = candidate
+        words = _folded(title).split()
+        if not words:
+            return 0.0
+        elsewhere = set().union(*(w for i, w in pages_text.items() if i != page_index))
+        return sum(1 for w in words if w in elsewhere) / len(words)
+
+    # The first title set wins unless a later one, set as large, is clearly
+    # better vouched for. A chapter heading the contents page repeats is
+    # vouched for too, but it is not set in the title's type.
+    best = candidates[0]
+    for candidate in candidates[1:]:
+        if candidate[2] >= best[2] * _TITLE_RIVAL_SIZE and attestation(candidate) >= attestation(best) + 0.5:
+            best = candidate
+    return best[1]
 
 
 def _language_sample(doc: fitz.Document) -> str:
