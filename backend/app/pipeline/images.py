@@ -210,3 +210,51 @@ def drop_page_backgrounds(
             pass
     kept = [img for img in extracted_images if img not in backgrounds]
     return kept + illustrations_in_background(page, page_index, text_blocks, images_dir)
+
+
+# A first page this much covered by one picture, carrying no more text than a
+# cover's title, author and strapline, is the book's cover.
+_COVER_IMAGE_COVERAGE = 0.5
+_COVER_MAX_TEXT_CHARS = 400
+
+
+def cover_from_first_page(
+    page: fitz.Page,
+    extracted_images: list[dict],
+    text_blocks: list[Block],
+    images_dir: Path,
+) -> dict | None:
+    """The first page, whole, as the book's cover.
+
+    A cover is designed as one picture: artwork with its title set over it.
+    Read like any other page, its title came out as a line of text and the
+    artwork as a page background, from which the largest picture -- one of
+    the two people on the cover -- was cut out and used as the cover instead.
+    The page is rendered as it prints, title and all, and nothing on it is
+    read as text.
+    """
+    page_area = page.rect.width * page.rect.height
+    if page_area <= 0 or not any(
+        _area(img["bbox"]) >= page_area * _COVER_IMAGE_COVERAGE for img in extracted_images
+    ):
+        return None
+    chars = sum(len(b.text.strip()) for b in text_blocks if b.kind == "text")
+    # A picture with no text over it may be a scanned page of text: OCR decides
+    # that, and a cover it cannot read is kept as the whole page anyway.
+    if not chars or chars > _COVER_MAX_TEXT_CHARS:
+        return None
+    region = rasterize.rasterize_region(page, tuple(page.rect), images_dir, "cover", padding=0.0, photo=True)
+    if region is None:
+        return None
+    for img in extracted_images:
+        try:
+            Path(img["path"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return {
+        "ref": region.ref,
+        "path": str(region.path),
+        "ext": region.path.suffix.lstrip("."),
+        "page": page.number + 1,
+        "bbox": list(region.bbox),
+    }

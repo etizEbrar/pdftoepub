@@ -246,6 +246,13 @@ def _extract_page_blocks(
 
     extracted_images = extract.extract_images(page, page_index, images_dir)
 
+    if page_index == 0:
+        # Before OCR, too: a cover's title is part of its design, not text.
+        cover = images_pipeline.cover_from_first_page(page, extracted_images, native_blocks, images_dir)
+        if cover is not None:
+            document.images[cover["ref"]] = cover
+            return images_pipeline.to_image_blocks([cover], page.rect.width, page.rect.height), None
+
     def page_images(text_blocks: list[Block]) -> list[Block]:
         # Decided against the text that will actually be used for the page: a
         # scan is the page's background whether its words came from the PDF's
