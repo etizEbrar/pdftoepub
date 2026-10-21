@@ -797,6 +797,10 @@ def reread_titles(
             image_path = work_dir / f"title_{index}.png"
             try:
                 page.get_pixmap(dpi=_REREAD_DPI, clip=clip & page.rect, colorspace=fitz.csGRAY).save(str(image_path))
+                # Rendering a scanned page decodes the whole scan into MuPDF's
+                # cache, which keeps up to 256 MB of them: one title after
+                # another filled it and the server ran out of memory.
+                fitz.TOOLS.store_shrink(100)
                 fresh = [w.text for w in run_ocr(image_path, language, psm=6).words]
             finally:
                 image_path.unlink(missing_ok=True)

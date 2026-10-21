@@ -96,6 +96,7 @@ def blocks_from_placed_words(
                 baseline=spans[-1].baseline,
                 line_id=f"p{page_num}_{id_prefix}l{block_index:03d}000",
                 source="ocr",
+                machine_read=True,
                 ocr_confidence=sum(confidences) / len(confidences),
                 direction=TextDirection.LTR,
             )

@@ -91,6 +91,11 @@ def rasterize_region(
     except Exception:
         logger.exception("failed to rasterize region %s", ref)
         return None
+    finally:
+        # The page's images were decoded to draw it, and MuPDF keeps them, up
+        # to 256 MB. Regions are drawn one after another, outside any page loop
+        # that would otherwise let them go.
+        fitz.TOOLS.store_shrink(100)
 
     images_dir.mkdir(parents=True, exist_ok=True)
     if photo:

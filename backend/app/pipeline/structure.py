@@ -17,6 +17,7 @@ NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
 _QUOTE_MAX_SIZE_RATIO = 0.96
 # Multi-line blocks a page needs before its own left margin is trusted.
 _MIN_PAGE_MARGIN_BLOCKS = 2
+_MIN_LINE_BLOCKS_FOR_MARGIN = 6
 # "Tablo 6: ...", "Şekil 8: ...", "Figure 2. ..." — a label naming the figure or
 # table it belongs to. Captions are set smaller and often indented, which is
 # exactly the shape of a block quote, so without this they were reconstructed as
@@ -157,9 +158,10 @@ def _is_smaller_than_body(block, body_size: float) -> bool:
 
     The margin matters: extraction jitters font sizes by a fraction of a point,
     and treating that as a deliberate size change would turn ordinary indented
-    paragraphs into block quotes.
+    paragraphs into block quotes. Text a machine read from a scan has no type
+    size to compare, only the height of the ink each word covers.
     """
-    if not body_size or not block.font_size:
+    if not body_size or not block.font_size or getattr(block, "machine_read", False):
         return False
     return block.font_size <= body_size * _QUOTE_MAX_SIZE_RATIO
 
@@ -354,6 +356,15 @@ def classify_blocks(
         for key, values in page_edges.items()
         if len(values) >= _MIN_PAGE_MARGIN_BLOCKS
     }
+    # A text layer that makes each printed line a block has no wrapped blocks
+    # to measure; there the margin is where most of the page's lines start,
+    # the indented first lines of paragraphs being the few that do not.
+    page_starts: dict[tuple[int, int], list[float]] = {}
+    for b in text_blocks:
+        page_starts.setdefault((b.page, b.column), []).append(b.bbox[0])
+    for key, starts in page_starts.items():
+        if key not in page_margins and len(starts) >= _MIN_LINE_BLOCKS_FOR_MARGIN:
+            page_margins[key] = sorted(starts)[len(starts) // 4]
 
     def margin_of(block: Block) -> float:
         return page_margins.get((block.page, block.column), left_margins.get(block.column, block.bbox[0]))

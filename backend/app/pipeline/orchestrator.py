@@ -273,6 +273,8 @@ def _extract_page_blocks(
             # The page is a scan under its text: what is worth keeping of it is
             # the pictures in it, found by rendering it once, small.
             document.analysis.scanned_text_pages.append(page_num)
+            for block in text_blocks:
+                block.machine_read = True
             kept = images_pipeline.illustrations_in_background(
                 page, page_index, text_blocks, images_dir, type_area
             )
@@ -281,6 +283,8 @@ def _extract_page_blocks(
                 extracted_images = extract.extract_images(page, page_index, images_dir)
             if any(images_pipeline.is_page_background(img, text_blocks, page) for img in extracted_images):
                 document.analysis.scanned_text_pages.append(page_num)
+                for block in text_blocks:
+                    block.machine_read = True
             kept = images_pipeline.drop_page_backgrounds(
                 page, page_index, extracted_images, text_blocks, images_dir, type_area
             )
@@ -485,6 +489,9 @@ def _execute_pipeline(job: Job) -> None:
             # worth cached at a time rather than letting a long scan fill it.
             fitz.TOOLS.store_shrink(100)
 
+        # Every page has been read: what decoding the scans took is free now,
+        # and the passes ahead hold the whole book's text at once.
+        _return_memory_to_os()
         all_blocks = [b for page_blocks in blocks_by_page.values() for b in page_blocks]
         document.blocks = all_blocks
         if document.analysis.ocr_pages:

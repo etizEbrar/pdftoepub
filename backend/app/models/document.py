@@ -129,6 +129,10 @@ class Block:
     source: str = "native"  # "native" | "ocr"
     ocr_confidence: float | None = None
     direction: TextDirection = TextDirection.LTR
+    # The text was read by a machine from an image of the page -- OCR here or
+    # the scanner's own layer. Its type sizes are measured from the ink each
+    # word covers, so they vary from line to line and say nothing about style.
+    machine_read: bool = False
 
     def geometry_dict(self) -> dict:
         """The canonical per-spec block/geometry record, text+geometry bound together."""

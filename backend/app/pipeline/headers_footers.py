@@ -24,7 +24,6 @@ _PAGE_NUMBER_RE = re.compile(rf"^{_FOLIO_ORNAMENT}*\d[\d\s]{{0,5}}{_FOLIO_ORNAME
 _NOTE_BODY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S+")
 _MIN_NOTE_BODY_WORDS = 3
 _TOP_BAND = 0.12
-_TOP_BAND_START = 0.10
 _BOTTOM_BAND = 0.90
 _MIN_PAGES_FOR_REPETITION = 3
 # Books conventionally alternate running heads: author on the verso, title on
@@ -44,6 +43,10 @@ _MAX_FOLIO_HEAD_WORDS = 14
 
 
 _MIN_KEY_LETTERS = 4
+_DIVISION_RE = re.compile(
+    r"^(?:bölüm|kısım|kisim|ünite|unite|chapter|part|book|section|kapitel|chapitre|capítulo)\s+[\divxlc]+\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize(text: str) -> str:
@@ -91,10 +94,6 @@ def _edge_blocks(blocks: list[Block]) -> dict[str, str]:
 def _band(block: Block) -> str | None:
     if block.bbox[3] <= block.page_height * _TOP_BAND:
         return "top"
-    # A scan sits a little lower on some pages than others; a head of a line
-    # or two that starts in the band is in it.
-    if block.bbox[1] <= block.page_height * _TOP_BAND_START and block.text.strip().count("\n") <= 1:
-        return "top"
     if block.bbox[1] >= block.page_height * _BOTTOM_BAND:
         return "bottom"
     return None
@@ -114,6 +113,7 @@ def _is_display_type(block: Block, body_size: float) -> bool:
 # scanner's text layer sizes each line to the ink it covers, and a running
 # head in capitals came out 1.2-1.4 times the body.
 _CHAPTER_TITLE_RATIO = 1.5
+_TITLE_MINORITY = 0.2
 
 
 def _is_chapter_title_type(block: Block, body_size: float) -> bool:
@@ -225,7 +225,7 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
             band = _band(b)
             if band is None:
                 edge = edges.get(b.block_id)
-                if edge is not None:
+                if edge is not None and not _DIVISION_RE.match(" ".join(b.text.split())):
                     # Outside the fixed bands but first or last on its page:
                     # furniture only if it repeats like furniture.
                     key = (_normalize(b.text), edge)
@@ -265,6 +265,10 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
                 furniture[b.block_id] = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
                 continue
 
+            if _DIVISION_RE.match(" ".join(b.text.split())):
+                # "Bölüm 3", "Chapter 3: ..." opens a chapter at the top of its
+                # page; compared by its letters, every chapter's looks alike.
+                continue
             key = (_normalize(b.text), band)
             occurrences[key].add(page_num)
             candidates[key].append(b)
@@ -276,11 +280,15 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
         if _is_repeating_furniture(pages, total_pages, odd_pages, even_pages):
             band = key[1]
             role = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
+            # A chapter opening set in display type at the top of its page can
+            # carry the very words of the running head over the pages after it
+            # -- "GİRİŞ" over "Giriş" -- and is the chapter's title. It is the
+            # odd one out; where most of a head's lines are large, a scanner
+            # measured them so, and large is simply how the head reads.
+            large = [b for b in candidates[key] if _is_chapter_title_type(b, body_size)]
+            protect = len(large) <= len(candidates[key]) * _TITLE_MINORITY
             for b in candidates[key]:
-                # A chapter opening set in display type at the top of its page
-                # can carry the very words of the running head over the pages
-                # after it -- "GİRİŞ" over "Giriş" -- and is the chapter's title.
-                if _is_chapter_title_type(b, body_size):
+                if protect and b in large:
                     continue
                 furniture[b.block_id] = role
 
