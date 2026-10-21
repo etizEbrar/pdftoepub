@@ -1,0 +1,258 @@
+{
+ "en-paper-single-column": {
+  "counts": {
+   "broken": 10,
+   "chars": 0,
+   "furniture": 3,
+   "glued": 1,
+   "headings": 0,
+   "hyphen": 1,
+   "junk": 4,
+   "ocr": 2,
+   "pictures": 0,
+   "split": 34
+  },
+  "epubcheck": true,
+  "words": 3936
+ },
+ "en-paper-tables": {
+  "counts": {
+   "broken": 1,
+   "chars": 0,
+   "furniture": 0,
+   "glued": 6,
+   "headings": 1,
+   "hyphen": 0,
+   "junk": 2,
+   "ocr": 7,
+   "pictures": 0,
+   "split": 24
+  },
+  "epubcheck": true,
+  "words": 5043
+ },
+ "en-paper-two-column": {
+  "counts": {
+   "broken": 15,
+   "chars": 12,
+   "furniture": 68,
+   "glued": 35,
+   "headings": 1,
+   "hyphen": 9,
+   "junk": 81,
+   "ocr": 4,
+   "pictures": 0,
+   "split": 21
+  },
+  "epubcheck": true,
+  "words": 7624
+ },
+ "en-scan-novel-1898": {
+  "counts": {
+   "broken": 18,
+   "chars": 0,
+   "furniture": 8,
+   "glued": 0,
+   "headings": 1,
+   "hyphen": 1,
+   "junk": 18,
+   "ocr": 4,
+   "pictures": 12,
+   "split": 11
+  },
+  "epubcheck": true,
+  "words": 45062
+ },
+ "en-scan-novel-1908": {
+  "counts": {
+   "broken": 34,
+   "chars": 0,
+   "furniture": 1,
+   "glued": 4,
+   "headings": 12,
+   "hyphen": 0,
+   "junk": 24,
+   "ocr": 56,
+   "pictures": 11,
+   "split": 21
+  },
+  "epubcheck": true,
+  "words": 19555
+ },
+ "en-scan-novel-1912": {
+  "counts": {
+   "broken": 19,
+   "chars": 0,
+   "furniture": 6,
+   "glued": 0,
+   "headings": 2,
+   "hyphen": 1,
+   "junk": 3,
+   "ocr": 0,
+   "pictures": 2,
+   "split": 2
+  },
+  "epubcheck": true,
+  "words": 53150
+ },
+ "tr-article-engineering": {
+  "counts": {
+   "broken": 0,
+   "chars": 0,
+   "furniture": 0,
+   "glued": 0,
+   "headings": 0,
+   "hyphen": 0,
+   "junk": 3,
+   "ocr": 1,
+   "pictures": 0,
+   "split": 0
+  },
+  "epubcheck": true,
+  "words": 2062
+ },
+ "tr-article-history": {
+  "counts": {
+   "broken": 2,
+   "chars": 0,
+   "furniture": 0,
+   "glued": 0,
+   "headings": 0,
+   "hyphen": 0,
+   "junk": 0,
+   "ocr": 0,
+   "pictures": 0,
+   "split": 0
+  },
+  "epubcheck": true,
+  "words": 2657
+ },
+ "tr-article-linguistics": {
+  "counts": {
+   "broken": 13,
+   "chars": 0,
+   "furniture": 14,
+   "glued": 1,
+   "headings": 0,
+   "hyphen": 23,
+   "junk": 5,
+   "ocr": 0,
+   "pictures": 0,
+   "split": 38
+  },
+  "epubcheck": true,
+  "words": 9684
+ },
+ "tr-digital-edited-volume": {
+  "counts": {
+   "broken": 11,
+   "chars": 0,
+   "furniture": 34,
+   "glued": 4,
+   "headings": 4,
+   "hyphen": 2,
+   "junk": 9,
+   "ocr": 9,
+   "pictures": 1,
+   "split": 8
+  },
+  "epubcheck": true,
+  "words": 34909
+ },
+ "tr-scan-history-1948": {
+  "counts": {
+   "broken": 197,
+   "chars": 0,
+   "furniture": 5,
+   "glued": 17,
+   "headings": 3,
+   "hyphen": 5,
+   "junk": 44,
+   "ocr": 13,
+   "pictures": 0,
+   "split": 285
+  },
+  "epubcheck": true,
+  "words": 44277
+ },
+ "tr-scan-magazine-1940": {
+  "counts": {
+   "broken": 88,
+   "chars": 0,
+   "furniture": 14,
+   "glued": 35,
+   "headings": 0,
+   "hyphen": 13,
+   "junk": 16,
+   "ocr": 116,
+   "pictures": 0,
+   "split": 126
+  },
+  "epubcheck": true,
+  "words": 36975
+ },
+ "tr-scan-medicine-1936": {
+  "counts": {
+   "broken": 17,
+   "chars": 0,
+   "furniture": 0,
+   "glued": 12,
+   "headings": 5,
+   "hyphen": 8,
+   "junk": 14,
+   "ocr": 84,
+   "pictures": 7,
+   "split": 237
+  },
+  "epubcheck": true,
+  "words": 25318
+ },
+ "tr-scan-novel-1943": {
+  "counts": {
+   "broken": 86,
+   "chars": 0,
+   "furniture": 1,
+   "glued": 6,
+   "headings": 9,
+   "hyphen": 27,
+   "junk": 11,
+   "ocr": 8,
+   "pictures": 3,
+   "split": 141
+  },
+  "epubcheck": true,
+  "words": 35649
+ },
+ "tr-scan-novel-kurk-mantolu": {
+  "counts": {
+   "broken": 7,
+   "chars": 0,
+   "furniture": 3,
+   "glued": 1,
+   "headings": 0,
+   "hyphen": 3,
+   "junk": 0,
+   "ocr": 6,
+   "pictures": 0,
+   "split": 42
+  },
+  "epubcheck": true,
+  "words": 40512
+ },
+ "tr-scan-phrasebook-1930": {
+  "counts": {
+   "broken": 15,
+   "chars": 0,
+   "furniture": 9,
+   "glued": 0,
+   "headings": 0,
+   "hyphen": 0,
+   "junk": 25,
+   "ocr": 1,
+   "pictures": 0,
+   "split": 16
+  },
+  "epubcheck": true,
+  "words": 5909
+ }
+}

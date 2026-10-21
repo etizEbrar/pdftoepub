@@ -559,7 +559,33 @@ def classify_blocks(
         )
 
     blocks_by_id = {b.block_id: b for b in ordered_blocks}
-    return _merge_caption_continuations(nodes, blocks_by_id)
+    return _merge_entry_continuations(_merge_caption_continuations(nodes, blocks_by_id))
+
+
+def _merge_entry_continuations(nodes: list[StructuralNode]) -> list[StructuralNode]:
+    """Join a contents entry to the line that finishes it.
+
+    A long entry wraps, and each line of a contents page is read as an entry
+    of its own: a list of illustrations showed "A vessel larger than our
+    little fishing sloop" and, as the next entry, "could not have threaded
+    its way among the". The second line of an entry starts in lowercase.
+    """
+    result: list[StructuralNode] = []
+    for node in nodes:
+        previous = result[-1] if result else None
+        text = strip_all_sentinels(node.text).lstrip()
+        if (
+            previous is not None
+            and node.role == BlockRole.TOC_ENTRY
+            and previous.role == BlockRole.TOC_ENTRY
+            and node.page == previous.page
+            and text[:1].islower()
+        ):
+            previous.text = f"{previous.text.rstrip()} {node.text.strip()}"
+            previous.source_block_ids.extend(node.source_block_ids)
+            continue
+        result.append(node)
+    return result
 
 
 # A caption's second line sits directly beneath its first.

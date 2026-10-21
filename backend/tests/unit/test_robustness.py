@@ -290,3 +290,22 @@ def test_a_page_of_text_leaves_no_room_for_a_picture_and_a_half_page_gap_does():
     assert not _room_for_a_picture(rect, full, area)
     gap = lines([(38 + i * 13, 50 + i * 13) for i in range(8)] + [(330 + i * 13, 342 + i * 13) for i in range(7)])
     assert _room_for_a_picture(rect, gap, area)
+
+
+def test_a_contents_entry_that_wraps_is_one_entry():
+    from app.pipeline.structure import _merge_entry_continuations
+
+    def entry(text: str) -> StructuralNode:
+        return StructuralNode(node_id=text[:8], role=BlockRole.TOC_ENTRY, text=text, page=14)
+
+    nodes = _merge_entry_continuations(
+        [
+            entry("A vessel larger than our little fishing sloop"),
+            entry("could not have threaded its way among the icebergs."),
+            entry("They spoke to us in a strange language."),
+        ]
+    )
+    assert [n.text for n in nodes] == [
+        "A vessel larger than our little fishing sloop could not have threaded its way among the icebergs.",
+        "They spoke to us in a strange language.",
+    ]
