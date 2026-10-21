@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from xml.sax.saxutils import escape as xml_escape
 
 from app.models.document import Block, Span
+from app.pipeline.epub.xmltext import xml_escape
 
 # Characters that only appear in mathematical settings. Greek letters are
 # included, but note that Greek *words* are excluded below — a Greek-language
@@ -62,8 +62,38 @@ def _math_symbol_ratio(text: str) -> float:
     return math_chars / len(stripped)
 
 
-def _has_math_font(spans: list[Span]) -> bool:
-    return any(any(hint in (s.font or "").lower() for hint in _MATH_FONT_HINTS) for s in spans)
+def _math_font_share(spans: list[Span]) -> float:
+    """Share of the block's characters set in a mathematics font.
+
+    A share, not a yes or no: an author's name carrying one footnote star in
+    the symbol font -- "Ashish Vaswani∗" -- was enough to turn every name on
+    a paper's title page into a picture of an equation.
+    """
+    total = sum(len(s.text.strip()) for s in spans)
+    if not total:
+        return 0.0
+    in_math = sum(
+        len(s.text.strip())
+        for s in spans
+        if any(hint in (s.font or "").lower() for hint in _MATH_FONT_HINTS)
+    )
+    return in_math / total
+
+
+# Prose that carries some mathematics -- "We used the Adam optimizer with
+# β1 = 0.9" -- is prose. Kept as text it reads, reflows and can be searched;
+# as a picture of a paragraph it does none of that.
+_PROSE_MIN_WORDS = 15
+_PROSE_WORD_SHARE = 0.6
+_PROSE_WORD_RE = re.compile(r"^[^\W\d_]{3,}[.,;:!?)]*$")
+
+
+def _reads_as_prose(text: str) -> bool:
+    tokens = text.split()
+    if len(tokens) < _PROSE_MIN_WORDS:
+        return False
+    words = sum(1 for t in tokens if _PROSE_WORD_RE.match(t.strip("(\"“”'")))
+    return words / len(tokens) >= _PROSE_WORD_SHARE
 
 
 def _looks_like_greek_prose(text: str) -> bool:
@@ -153,11 +183,11 @@ def detect_formula(block: Block) -> FormulaCandidate | None:
     text = block.text.strip()
     if not text or len(text) > 400:
         return None
-    if _looks_like_greek_prose(text):
+    if _looks_like_greek_prose(text) or _reads_as_prose(text):
         return None
 
     symbol_ratio = _math_symbol_ratio(text)
-    math_font = _has_math_font(block.spans)
+    math_font_share = _math_font_share(block.spans)
     has_scripts = any(s.is_superscript or s.is_subscript for s in block.spans)
     equation_number = _extract_equation_number(block)
     word_count = len(text.split())
@@ -171,8 +201,10 @@ def detect_formula(block: Block) -> FormulaCandidate | None:
         score += 0.35
     elif symbol_ratio > 0:
         score += 0.15
-    if math_font:
+    if math_font_share >= 0.3:
         score += 0.30
+    elif math_font_share > 0:
+        score += 0.05
     if has_scripts:
         score += 0.15
     if equation_number:

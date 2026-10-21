@@ -7,7 +7,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from xml.sax.saxutils import escape as xml_escape
+from app.pipeline.epub.xmltext import xml_escape, xml_text
 
 from app.pipeline import footnotes as footnotes_module
 from app.pipeline import headings as headings_module
@@ -794,6 +794,36 @@ def _content_opf(
 _COVER_MIN_PAGE_COVERAGE = 0.5
 
 
+_ID_RE = re.compile(r'\bid="([^"]+)"')
+_LINK_RE = re.compile(r'<a\b([^>]*)\bhref="([^"#]*)#([^"]+)"([^>]*)>(.*?)</a>', re.DOTALL)
+
+
+def _drop_dangling_links(bodies: dict[str, str]) -> dict[str, str]:
+    """Unlink every reference to an anchor the book does not contain.
+
+    One dangling fragment fails EPUBCheck, and a failed check fails the whole
+    conversion. They arise wherever a pass downstream of note linking takes
+    text away -- a table kept as a picture swallowed the markers a note's
+    back-links pointed at -- so the guarantee is made here, once, for all of
+    them: a note reference with no note becomes its plain marker, and a
+    back-link with nothing to return to is dropped.
+    """
+    ids = {name: set(_ID_RE.findall(body)) for name, body in bodies.items()}
+    fixed: dict[str, str] = {}
+    for name, body in bodies.items():
+        def check(match: re.Match) -> str:
+            before, target_file, fragment, after, content = match.groups()
+            target = target_file.rsplit("/", 1)[-1] if target_file else name
+            if fragment in ids.get(target, ()):
+                return match.group(0)
+            if "noteback" in before + after:
+                return ""
+            return content
+
+        fixed[name] = _LINK_RE.sub(check, body)
+    return fixed
+
+
 def _find_cover_ref(document: DocumentModel) -> str | None:
     """A page-1 image covering most of the page is almost always the cover."""
     page_area = None
@@ -846,8 +876,8 @@ def build_epub(
         zf.writestr("META-INF/container.xml", _container_xml())
         zf.writestr("OEBPS/css/style.css", DEFAULT_STYLESHEET)
 
-        for ch in chapters:
-            body = render_chapter_body(
+        bodies = {
+            ch.filename: render_chapter_body(
                 ch,
                 ch.filename,
                 node_chapter_map,
@@ -856,21 +886,32 @@ def build_epub(
                 ref_chapter_map,
                 heading_targets,
             )
+            for ch in chapters
+        }
+        bodies = _drop_dangling_links(bodies)
+        for ch in chapters:
+            # Every fragment was escaped on its way in; this is the last line
+            # of defence for anything that was not, since one forbidden
+            # character makes the whole book fail validation.
             zf.writestr(
-                f"OEBPS/text/{ch.filename}", _chapter_xhtml(ch.title, body, lang, direction)
+                f"OEBPS/text/{ch.filename}",
+                xml_text(_chapter_xhtml(ch.title, bodies[ch.filename], lang, direction)),
             )
 
-        for ref, img in document.images.items():
-            src_path = Path(img["path"])
-            if src_path.exists():
-                zf.writestr(f"OEBPS/images/{ref}.{img['ext']}", src_path.read_bytes())
+        # Only pictures that exist are declared: a manifest entry with no file
+        # behind it fails validation as surely as a broken document.
+        images = {ref: img for ref, img in document.images.items() if Path(img["path"]).exists()}
+        for ref, img in images.items():
+            zf.writestr(f"OEBPS/images/{ref}.{img['ext']}", Path(img["path"]).read_bytes())
+        if cover_ref not in images:
+            cover_ref = None
 
-        zf.writestr("OEBPS/nav.xhtml", _nav_xhtml(chapters, lang, title, direction))
-        zf.writestr("OEBPS/toc.ncx", _toc_ncx(chapters, title, identifier))
+        zf.writestr("OEBPS/nav.xhtml", xml_text(_nav_xhtml(chapters, lang, title, direction)))
+        zf.writestr("OEBPS/toc.ncx", xml_text(_toc_ncx(chapters, title, identifier)))
         zf.writestr(
             "OEBPS/content.opf",
-            _content_opf(
-                chapters, document.images, title, author, lang, identifier, cover_ref, direction
+            xml_text(
+                _content_opf(chapters, images, title, author, lang, identifier, cover_ref, direction)
             ),
         )
 

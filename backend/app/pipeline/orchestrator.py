@@ -234,6 +234,7 @@ def _extract_page_blocks(
     images_dir: Path,
     ocr_languages: str | None,
     client_page: ClientOCRPage | None = None,
+    type_area: tuple[float, float, float, float] | None = None,
 ) -> tuple[list[Block], StructuralNode | None]:
     """Get one page's blocks using the cheapest reliable source for that page.
 
@@ -243,31 +244,58 @@ def _extract_page_blocks(
     """
     page_num = page_index + 1
     native_blocks = extract.extract_page_blocks(page, page_index)
-
-    extracted_images = extract.extract_images(page, page_index, images_dir)
+    scan = images_pipeline.page_is_scan(page)
 
     if page_index == 0:
         # Before OCR, too: a cover's title is part of its design, not text.
+        # A scanned cover is the page itself; its layers need no extracting,
+        # which on a large scan meant decoding them in full for nothing.
+        extracted_images = (
+            [{"bbox": list(page.rect), "path": ""}]
+            if scan
+            else extract.extract_images(page, page_index, images_dir)
+        )
         cover = images_pipeline.cover_from_first_page(page, extracted_images, native_blocks, images_dir)
         if cover is not None:
             document.images[cover["ref"]] = cover
             return images_pipeline.to_image_blocks([cover], page.rect.width, page.rect.height), None
+        if scan:
+            extracted_images = None
+    else:
+        extracted_images = None
 
     def page_images(text_blocks: list[Block]) -> list[Block]:
+        nonlocal extracted_images
         # Decided against the text that will actually be used for the page: a
         # scan is the page's background whether its words came from the PDF's
         # own text layer or from OCR.
-        if any(images_pipeline.is_page_background(img, text_blocks, page) for img in extracted_images):
+        if scan and sum(len(b.text.strip()) for b in text_blocks if b.kind == "text") >= 3:
+            # The page is a scan under its text: what is worth keeping of it is
+            # the pictures in it, found by rendering it once, small.
             document.analysis.scanned_text_pages.append(page_num)
-        kept = images_pipeline.drop_page_backgrounds(
-            page, page_index, extracted_images, text_blocks, images_dir
-        )
+            kept = images_pipeline.illustrations_in_background(
+                page, page_index, text_blocks, images_dir, type_area
+            )
+        else:
+            if extracted_images is None:
+                extracted_images = extract.extract_images(page, page_index, images_dir)
+            if any(images_pipeline.is_page_background(img, text_blocks, page) for img in extracted_images):
+                document.analysis.scanned_text_pages.append(page_num)
+            kept = images_pipeline.drop_page_backgrounds(
+                page, page_index, extracted_images, text_blocks, images_dir, type_area
+            )
         for img in kept:
             document.images[img["ref"]] = img
         return images_pipeline.to_image_blocks(kept, page.rect.width, page.rect.height)
 
     if kind == PageTextKind.NATIVE or kind == PageTextKind.EMPTY:
         return native_blocks + page_images(native_blocks), None
+
+    if kind == PageTextKind.SCANNED and not native_blocks and client_page is None and images_pipeline.is_blank_page(page):
+        # An endpaper or flyleaf: nothing for OCR to read, nothing to show.
+        document.warnings.append(f"page {page_num}: blank leaf, left out")
+        document.analysis.blank_pages.append(page_num)
+        return [], None
 
     if client_page is not None:
         # The client read this page on its own hardware. Trusted for the words
@@ -403,6 +431,7 @@ def _execute_pipeline(job: Job) -> None:
         blocks_by_page: dict[int, list[Block]] = {}
         page_fallback_nodes: list[StructuralNode] = []
         pages = _LazyPages(doc)
+        type_area = images_pipeline.type_area(doc)
         for i in range(analysis.page_count):
             page = doc[i]
             kind = analysis.page_kinds.get(i + 1, PageTextKind.NATIVE)
@@ -419,7 +448,7 @@ def _execute_pipeline(job: Job) -> None:
                 )
             page_started = time.monotonic()
             page_blocks, fallback_node = _extract_page_blocks(
-                page, i, kind, document, images_dir, ocr_languages, client_page
+                page, i, kind, document, images_dir, ocr_languages, client_page, type_area
             )
             # Only pages this server read itself are charged to the OCR budget:
             # placing a client's words is milliseconds, and counting it would
@@ -464,6 +493,16 @@ def _execute_pipeline(job: Job) -> None:
                 sum(confidences) / len(confidences) if confidences else 0.0
             )
 
+        if not any(b.kind == "text" for b in all_blocks) and not page_fallback_nodes:
+            # Blank leaves are left out of a book with something else in it.
+            # A document of nothing else is kept as it is, page for page,
+            # rather than refused: what the reader sent is what they get.
+            for page_num in document.analysis.blank_pages:
+                node = enrich.preserve_page_as_image(
+                    document, pages[page_num], page_num, images_dir, "page has no text"
+                )
+                if node is not None:
+                    page_fallback_nodes.append(node)
         if not any(b.kind == "text" for b in all_blocks) and not page_fallback_nodes:
             raise UnsupportedDocumentComplexityError("No extractable text was found in this PDF.")
 
@@ -564,7 +603,12 @@ def _execute_pipeline(job: Job) -> None:
         for page_num, page in pages.items():
             detected_tables.extend(
                 tables_module.detect_tables_on_page(
-                    page, blocks_by_page.get(page_num, []), hyphen_evidence
+                    page,
+                    blocks_by_page.get(page_num, []),
+                    hyphen_evidence,
+                    # A scan has no ruled lines to find, only the picture of
+                    # them; looking would decode the whole page for nothing.
+                    ruled=page_num not in machine_read and not images_pipeline.page_is_scan(page),
                 )
             )
             # Measured: each page's table detection left about 4 MB in MuPDF's

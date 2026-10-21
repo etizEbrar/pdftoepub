@@ -37,3 +37,6 @@ backend/tests/fixtures/*.pdf
 ios/build/
 *.xcarchive
 *.ipa
+
+# Audit corpus: real books, fetched by backend/scripts/corpus/fetch.py
+backend/corpus/

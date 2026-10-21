@@ -15,6 +15,7 @@ from app.core.errors import (
 from app.core.logging import get_logger
 from app.models.document import PageTextKind, PDFAnalysis, PDFClassification, TextDirection
 from app.pipeline.bidi import detect_direction
+from app.pipeline.extract import TEXT_ONLY_FLAGS
 from app.pipeline.ocr.classify import classify_document
 
 logger = get_logger(__name__)
@@ -110,7 +111,7 @@ def _title_candidates(doc: fitz.Document) -> list[tuple[int, str, float]]:
     found: list[tuple[int, str, float]] = []
     for page_index in range(min(_TITLE_SEARCH_PAGES, doc.page_count)):
         spans = []
-        for block in doc[page_index].get_text("dict").get("blocks", []):
+        for block in doc[page_index].get_text("dict", flags=TEXT_ONLY_FLAGS).get("blocks", []):
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
                     text = span.get("text", "").strip()

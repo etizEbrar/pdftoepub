@@ -22,6 +22,12 @@ def _looks_italic(font_name: str, flags: int) -> bool:
     return bool(flags & _FLAG_ITALIC) or "italic" in lname or "oblique" in lname
 
 
+# The text of a page without its pictures. By default the "dict" extraction
+# carries every image on the page, decoded: on a 232-page scan that was 9 MB
+# and half a second a page, for text extraction that throws the images away.
+# Measured over 40 pages: 360 MB and 20 s with them, 2 MB and 0.1 s without.
+TEXT_ONLY_FLAGS = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+
 # Two fragments belong to the same visual line when their vertical extents
 # overlap by at least this share of the shorter one.
 _SAME_LINE_OVERLAP = 0.55
@@ -109,7 +115,7 @@ def _group_fragments_into_visual_lines(raw_lines: list[dict]) -> list[list[dict]
 def extract_page_blocks(page: fitz.Page, page_index: int) -> list[Block]:
     """Geometry-aware text extraction: one Block per PDF text block, each carrying
     the spans that make it up. Text and geometry stay bound together (per spec)."""
-    raw = page.get_text("dict")
+    raw = page.get_text("dict", flags=TEXT_ONLY_FLAGS)
     blocks: list[Block] = []
     page_num = page_index + 1
 
@@ -151,6 +157,13 @@ def extract_page_blocks(page: fitz.Page, page_index: int) -> list[Block]:
                         and not frag_text[0].isspace()
                     ):
                         line_parts.append(" ")
+                        # The space goes on the span too. Later stages rebuild
+                        # the text from spans, and a space kept only in the
+                        # block's text was lost there: an OCR layer that sets
+                        # every word apart ran a whole book together,
+                        # "madnesssoappealedto myimaginationthatall".
+                        if all_spans:
+                            all_spans[-1].text += " "
                 previous_bbox = raw_line.get("bbox", (0, 0, 0, 0))
                 for raw_span in raw_line.get("spans", []):
                     text = raw_span.get("text", "")

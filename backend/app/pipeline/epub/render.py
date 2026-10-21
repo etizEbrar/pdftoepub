@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from xml.sax.saxutils import escape as xml_escape
+from app.pipeline.epub.xmltext import xml_escape
 
 from app.pipeline import footnotes
 

@@ -136,8 +136,118 @@ def _regions(cells: set[tuple[int, int]]) -> list[tuple[int, int, int, int]]:
     return regions
 
 
+_ROOM_GRID_PT = 12.0
+
+
+# Pages with this much text show where the book sets its type.
+_TYPE_AREA_MIN_CHARS = 300
+_TYPE_AREA_SAMPLE_PAGES = 80
+
+
+def type_area(doc: fitz.Document) -> tuple[float, float, float, float] | None:
+    """Where the book sets its text, from the pages that are full of it.
+
+    Read from the text alone, without the pictures, so it costs a few
+    milliseconds a page. The median page's extent, running head to last line.
+    """
+    step = max(1, doc.page_count // _TYPE_AREA_SAMPLE_PAGES)
+    from app.pipeline.extract import TEXT_ONLY_FLAGS
+
+    extents: list[tuple[float, float, float, float]] = []
+    for index in range(0, doc.page_count, step):
+        blocks = [
+            b for b in doc[index].get_text("dict", flags=TEXT_ONLY_FLAGS).get("blocks", [])
+            if b.get("type") == 0
+        ]
+        chars = sum(len(s.get("text", "")) for b in blocks for ln in b.get("lines", []) for s in ln.get("spans", []))
+        if chars < _TYPE_AREA_MIN_CHARS:
+            continue
+        extents.append(
+            (
+                min(b["bbox"][0] for b in blocks),
+                min(b["bbox"][1] for b in blocks),
+                max(b["bbox"][2] for b in blocks),
+                max(b["bbox"][3] for b in blocks),
+            )
+        )
+    if len(extents) < 3:
+        return None
+    middle = len(extents) // 2
+    return tuple(sorted(e[i] for e in extents)[middle] for i in range(4))  # type: ignore[return-value]
+
+
+def _room_for_a_picture(
+    page_rect: fitz.Rect,
+    text_blocks: list[Block],
+    area: tuple[float, float, float, float] | None = None,
+) -> bool:
+    """Whether the text leaves an empty rectangle the size of the smallest picture kept.
+
+    Looked for inside the book's type area: the margins around the text are a
+    long empty strip on every page of an old book, and no picture.
+    """
+    boxes = [b.bbox for b in text_blocks if b.kind == "text" and b.text.strip()]
+    if not boxes:
+        return True
+    if area is None:
+        area = (min(b[0] for b in boxes), page_rect.y0, max(b[2] for b in boxes), page_rect.y1)
+    left, top = max(page_rect.x0, area[0]), max(page_rect.y0, area[1])
+    right, bottom = min(page_rect.x1, area[2]), min(page_rect.y1, area[3])
+    if right - left < page_rect.width * _ILLUSTRATION_MIN_SIDE or bottom - top < page_rect.height * _ILLUSTRATION_MIN_SIDE:
+        return True
+    columns = max(1, int((right - left) / _ROOM_GRID_PT))
+    rows = max(1, int((bottom - top) / _ROOM_GRID_PT))
+    cell_w, cell_h = (right - left) / columns, (bottom - top) / rows
+    filled = [[False] * columns for _ in range(rows)]
+    for x0, y0, x1, y1 in boxes:
+        for r in range(max(0, int((y0 - top) / cell_h)), min(rows, int((y1 - top) / cell_h) + 1)):
+            for c in range(max(0, int((x0 - left) / cell_w)), min(columns, int((x1 - left) / cell_w) + 1)):
+                filled[r][c] = True
+    need_w = page_rect.width * _ILLUSTRATION_MIN_SIDE
+    need_h = page_rect.height * _ILLUSTRATION_MIN_SIDE
+    need_area = page_rect.width * page_rect.height * _ILLUSTRATION_MIN_AREA
+    # Largest empty rectangle, row by row, over a histogram of empty runs.
+    heights = [0] * columns
+    for r in range(rows):
+        for c in range(columns):
+            heights[c] = 0 if filled[r][c] else heights[c] + 1
+        stack: list[int] = []
+        for c in range(columns + 1):
+            current = heights[c] if c < columns else 0
+            while stack and heights[stack[-1]] >= current:
+                height = heights[stack.pop()]
+                left = stack[-1] + 1 if stack else 0
+                w, h = (c - left) * cell_w, height * cell_h
+                if w >= need_w and h >= need_h and w * h >= need_area:
+                    return True
+            stack.append(c)
+    return False
+
+
+# A picture carries a caption beside it or a few labels on it, not lines of
+# text over a quarter of its area.
+_MAX_PICTURE_TEXT_SHARE = 0.25
+
+
+def _text_share(region: tuple[float, float, float, float], text_blocks: list[Block]) -> float:
+    area = _area(region)
+    if area <= 0:
+        return 0.0
+    covered = 0.0
+    for block in text_blocks:
+        if block.kind != "text":
+            continue
+        x0, y0, x1, y1 = block.bbox
+        covered += _area((max(x0, region[0]), max(y0, region[1]), min(x1, region[2]), min(y1, region[3])))
+    return covered / area
+
+
 def illustrations_in_background(
-    page: fitz.Page, page_index: int, text_blocks: list[Block], images_dir: Path
+    page: fitz.Page,
+    page_index: int,
+    text_blocks: list[Block],
+    images_dir: Path,
+    area: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
     """Cut the real pictures out of a page background, leaving the ornaments.
 
@@ -148,6 +258,11 @@ def illustrations_in_background(
     """
     page_rect = page.rect
     page_area = page_rect.width * page_rect.height
+    if not _room_for_a_picture(page_rect, text_blocks, area):
+        # A page of text leaves no space a picture could be in, and looking
+        # means decoding the scan: two thirds of a scanned book's conversion
+        # time went on pages of nothing but text.
+        return []
     try:
         cells, cell_pt = _ink_cells(page, text_blocks)
     except Exception:
@@ -176,6 +291,11 @@ def illustrations_in_background(
         )
         if edges >= 2 and min(width, height) < min(page_rect.width, page_rect.height) * 0.1:
             continue
+        if _text_share(bbox, text_blocks) > _MAX_PICTURE_TEXT_SHARE:
+            # Rules and ornaments around lines of print -- a title page --
+            # join into one region of ink. Its words are already text; as a
+            # picture as well, the page appeared twice.
+            continue
         ref = f"p{page_index + 1}_art{len(found):02d}"
         region = rasterize.rasterize_region(page, bbox, images_dir, ref, photo=True)
         if region is None:
@@ -198,6 +318,7 @@ def drop_page_backgrounds(
     extracted_images: list[dict],
     text_blocks: list[Block],
     images_dir: Path,
+    area: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
     """The page's images minus the page itself, plus any picture cut from it."""
     backgrounds = [img for img in extracted_images if is_page_background(img, text_blocks, page)]
@@ -209,7 +330,7 @@ def drop_page_backgrounds(
         except OSError:
             pass
     kept = [img for img in extracted_images if img not in backgrounds]
-    return kept + illustrations_in_background(page, page_index, text_blocks, images_dir)
+    return kept + illustrations_in_background(page, page_index, text_blocks, images_dir, area)
 
 
 # A first page this much covered by one picture, carrying no more text than a
@@ -247,6 +368,8 @@ def cover_from_first_page(
     if region is None:
         return None
     for img in extracted_images:
+        if not img.get("path"):
+            continue
         try:
             Path(img["path"]).unlink(missing_ok=True)
         except OSError:
@@ -258,3 +381,72 @@ def cover_from_first_page(
         "page": page.number + 1,
         "bbox": list(region.bbox),
     }
+
+
+# A blank leaf: the paper's own colour nearly everywhere. Ink is anything this
+# much darker than the paper, and a page with less than this share of it --
+# a library stamp, a pencilled shelf mark -- has nothing to read. Measured on
+# real scans: blank leaves at 0.02% or less, the sparsest page of verse at 2%.
+_BLANK_PROBE_DPI = 40
+_BLANK_INK_CONTRAST = 50
+_BLANK_MAX_INK_SHARE = 0.001
+
+
+def is_blank_page(page: fitz.Page) -> bool:
+    """Whether a page without a text layer is an empty leaf of paper.
+
+    A scanned book opens and closes on endpapers and flyleaves. Each went to
+    OCR, which found nothing, and was then kept as a picture of a page: a
+    reader paged through a dozen photographs of blank paper before chapter one.
+    """
+    try:
+        pix = page.get_pixmap(dpi=_BLANK_PROBE_DPI, colorspace=fitz.csGRAY, alpha=False)
+    except Exception:
+        return False
+    samples = pix.samples
+    if not samples:
+        return False
+    histogram = [samples.count(level) for level in range(256)]
+    total = len(samples)
+    # The paper is the median level: aged, tinted or grey, it fills the page.
+    running, paper = 0, 255
+    for level, count in enumerate(histogram):
+        running += count
+        if running >= total / 2:
+            paper = level
+            break
+    ink = sum(histogram[: max(0, paper - _BLANK_INK_CONTRAST)])
+    return ink / total < _BLANK_MAX_INK_SHARE
+
+
+# An image shaped like the page and at least this many pixels per point across
+# it is a scan of the page (or one layer of one), whatever else is on it.
+_SCAN_ASPECT_TOLERANCE = 0.03
+_SCAN_MIN_PIXELS_PER_POINT = 1.0
+
+
+def page_is_scan(page: fitz.Page) -> bool:
+    """Whether every picture on the page is the page itself, read cheaply.
+
+    Answered from the images' pixel sizes alone. Finding where an image sits
+    on the page means running the page, which decodes every scan in full: on a
+    232-page book each run cost a third of a second and memory MuPDF kept, and
+    a page was run three or four times over -- for its text, its pictures,
+    its tables -- to throw the scan away at the end.
+    """
+    width, height = page.rect.width, page.rect.height
+    if not width or not height:
+        return False
+    images = page.get_images(full=True)
+    if not images:
+        return False
+    aspect = width / height
+    for item in images:
+        pixels_wide, pixels_high = item[2], item[3]
+        if not pixels_wide or not pixels_high:
+            return False
+        if abs(pixels_wide / pixels_high - aspect) > aspect * _SCAN_ASPECT_TOLERANCE:
+            return False
+        if pixels_wide < width * _SCAN_MIN_PIXELS_PER_POINT:
+            return False
+    return True

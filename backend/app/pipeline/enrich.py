@@ -215,6 +215,68 @@ def _node_bbox(node: StructuralNode, blocks_by_id: dict[str, Block]):
     )
 
 
+# Vector strokes nearer than this to one another belong to one drawing.
+_DRAWING_JOIN_PT = 18.0
+# A drawing ends this close above its caption.
+_DRAWING_CAPTION_GAP_PT = 60.0
+
+
+def _drawing_above(page, caption_box) -> tuple[float, float, float, float] | None:
+    """The extent of the vector drawing standing just above a caption.
+
+    Built upward from the strokes nearest the caption, taking in each stroke
+    that reaches the drawing so far, so that a rule across the page above it
+    or a table further up is not swallowed into the figure.
+    """
+    try:
+        rects = [d["rect"] for d in page.get_drawings() if d.get("rect") is not None]
+    except Exception:
+        return None
+    # Strokes that start above the caption; a chart's frame may reach down
+    # behind it. An axis is a line, with no area, and still counts.
+    rects = [
+        r for r in rects
+        if r.y0 < caption_box[1]
+        and r.y1 <= caption_box[3] + 2
+        and r.width < page.rect.width * 0.95
+        and (r.width > 0 or r.height > 0)
+    ]
+    seed = [r for r in rects if caption_box[1] - r.y1 <= _DRAWING_CAPTION_GAP_PT]
+    if len(seed) < _MIN_DIAGRAM_DRAWINGS:
+        return None
+    x0 = min(r.x0 for r in seed)
+    y0 = min(r.y0 for r in seed)
+    x1 = max(r.x1 for r in seed)
+    y1 = max(r.y1 for r in seed)
+    # Take in every stroke that reaches the drawing so far, in any direction:
+    # a flowchart's boxes stand beside one another as well as above.
+    pending = [r for r in rects if r not in seed]
+    grew = True
+    while grew:
+        grew = False
+        for r in list(pending):
+            if (
+                r.x1 >= x0 - _DRAWING_JOIN_PT
+                and r.x0 <= x1 + _DRAWING_JOIN_PT
+                and r.y1 >= y0 - _DRAWING_JOIN_PT
+                and r.y0 <= y1 + _DRAWING_JOIN_PT
+            ):
+                x0, y0, x1, y1 = min(x0, r.x0), min(y0, r.y0), max(x1, r.x1), max(y1, r.y1)
+                pending.remove(r)
+                grew = True
+    return (x0, y0, x1, y1)
+
+
+def _inside(box, region, margin: float = 10.0) -> bool:
+    cx = (box[0] + box[2]) / 2
+    cy = (box[1] + box[3]) / 2
+    return region[0] - margin <= cx <= region[2] + margin and region[1] - margin <= cy <= region[3] + margin
+
+
+def _within_columns(box, region, margin: float = 10.0) -> bool:
+    return box[0] >= region[0] - margin and box[2] <= region[2] + margin
+
+
 def _is_label(node: StructuralNode) -> bool:
     text = " ".join(strip_all_sentinels(node.text).split())
     lines = [ln for ln in node.text.split("\n") if ln.strip()]
@@ -253,6 +315,9 @@ def apply_composite_figures(
         if caption_box is None:
             continue
 
+        page = pages.get(caption.page)
+        drawn = _drawing_above(page, caption_box) if page is not None else None
+
         # Walk back from the caption over the pieces of the figure, stopping
         # at the first thing that is part of the text.
         parts: list[int] = []
@@ -267,7 +332,17 @@ def apply_composite_figures(
             box = _node_bbox(node, blocks_by_id)
             if box is None or box[1] >= caption_box[1]:
                 break
-            if node.role in _FIGURE_PART_ROLES:
+            if drawn is not None and node.role != BlockRole.CAPTION and _inside(box, drawn):
+                # Anything set on the drawing is part of it, whatever it was
+                # read as: a chart's axis values came out as a footnote and its
+                # axis title as a heading, and stopped the walk halfway up.
+                parts.append(cursor)
+            elif drawn is not None and not _within_columns(box, drawn):
+                # Beside the drawing's columns is the text again, however
+                # short its line: "sonuçları Şekil 4'de verilmiştir." above a
+                # chart was cut into the picture of it.
+                break
+            elif node.role in _FIGURE_PART_ROLES:
                 parts.append(cursor)
             elif _is_label(node) and (
                 node.role != BlockRole.HEADING
@@ -285,7 +360,6 @@ def apply_composite_figures(
         labels = sum(1 for p in parts if nodes[p].role in _LABEL_ROLES)
         tables = sum(1 for p in parts if nodes[p].role in (BlockRole.TABLE, BlockRole.IMAGE_FALLBACK))
         top = min(b[1] for b in boxes)
-        page = pages.get(caption.page)
         if page is None:
             continue
         drawings = []

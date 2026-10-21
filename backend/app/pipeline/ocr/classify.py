@@ -22,8 +22,21 @@ def image_coverage_ratio(page: fitz.Page) -> float:
     page_area = page.rect.width * page.rect.height
     if page_area <= 0:
         return 0.0
+    # A scan is a picture shaped like the page: it covers the page, and
+    # finding out where it sits would decode it in full. On a 232-page scan
+    # that alone took 200 MB, a third of the server's memory.
+    aspect = page.rect.width / page.rect.height
     covered = 0.0
     for img in page.get_images(full=True):
+        pixels_wide, pixels_high = img[2], img[3]
+        if (
+            pixels_wide
+            and pixels_high
+            and abs(pixels_wide / pixels_high - aspect) <= aspect * 0.03
+            and pixels_wide >= page.rect.width
+        ):
+            covered += page_area
+            continue
         try:
             rects = page.get_image_rects(img[0])
         except Exception:

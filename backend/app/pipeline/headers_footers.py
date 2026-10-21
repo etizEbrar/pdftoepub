@@ -24,6 +24,7 @@ _PAGE_NUMBER_RE = re.compile(rf"^{_FOLIO_ORNAMENT}*\d[\d\s]{{0,5}}{_FOLIO_ORNAME
 _NOTE_BODY_RE = re.compile(r"^\s*([\d]{1,4}|[*†‡§¶#]{1,3})[.)\]]?\s+\S+")
 _MIN_NOTE_BODY_WORDS = 3
 _TOP_BAND = 0.12
+_TOP_BAND_START = 0.10
 _BOTTOM_BAND = 0.90
 _MIN_PAGES_FOR_REPETITION = 3
 # Books conventionally alternate running heads: author on the verso, title on
@@ -42,10 +43,21 @@ _FOLIO_HEAD_RE = re.compile(
 _MAX_FOLIO_HEAD_WORDS = 14
 
 
+_MIN_KEY_LETTERS = 4
+
+
 def _normalize(text: str) -> str:
     # Spaces are dropped, not collapsed. A running head set letter-spaced comes
     # out of OCR with the gaps in a different place on every page -- "ÇEKEN",
     # "ÇEK EN", "Ç E K E N" -- and compared word by word no two pages agreed.
+    #
+    # So are digits and punctuation, where letters remain to compare: a scan's
+    # head reads "83 A STUDY IN SCARLET," on one page and "A STUDY IN
+    # SCARLET. 97" on the next, and as three different lines none of them
+    # repeated often enough to be recognised.
+    letters = "".join(c for c in text.casefold() if c.isalpha())
+    if len(letters) >= _MIN_KEY_LETTERS:
+        return letters
     return _DIGITS_RE.sub("#", "".join(text.split())).lower()
 
 
@@ -57,8 +69,31 @@ def _looks_like_note_body(text: str) -> bool:
     return len(stripped.split()) >= _MIN_NOTE_BODY_WORDS
 
 
+# The first or last line of a page is the place for a running head or foot,
+# wherever the scanner put the page: in one book the head sat at 11-13% of
+# the page height, half its pages either side of a fixed band.
+_EDGE_MAX_CHARS = 90
+_EDGE_MAX_LINES = 2
+
+
+def _edge_blocks(blocks: list[Block]) -> dict[str, str]:
+    text = [b for b in blocks if b.kind == "text" and b.text.strip()]
+    if len(text) < 3:
+        return {}
+    edges: dict[str, str] = {}
+    for block, band in ((min(text, key=lambda b: b.bbox[1]), "top"), (max(text, key=lambda b: b.bbox[3]), "bottom")):
+        stripped = block.text.strip()
+        if len(stripped) <= _EDGE_MAX_CHARS and stripped.count("\n") < _EDGE_MAX_LINES:
+            edges[block.block_id] = band
+    return edges
+
+
 def _band(block: Block) -> str | None:
     if block.bbox[3] <= block.page_height * _TOP_BAND:
+        return "top"
+    # A scan sits a little lower on some pages than others; a head of a line
+    # or two that starts in the band is in it.
+    if block.bbox[1] <= block.page_height * _TOP_BAND_START and block.text.strip().count("\n") <= 1:
         return "top"
     if block.bbox[1] >= block.page_height * _BOTTOM_BAND:
         return "bottom"
@@ -73,6 +108,16 @@ _DISPLAY_TYPE_RATIO = 1.35
 
 def _is_display_type(block: Block, body_size: float) -> bool:
     return bool(body_size) and bool(block.font_size) and block.font_size >= body_size * _DISPLAY_TYPE_RATIO
+
+
+# Type a chapter's title is set in. Higher than the display-type mark: a
+# scanner's text layer sizes each line to the ink it covers, and a running
+# head in capitals came out 1.2-1.4 times the body.
+_CHAPTER_TITLE_RATIO = 1.5
+
+
+def _is_chapter_title_type(block: Block, body_size: float) -> bool:
+    return bool(body_size) and bool(block.font_size) and block.font_size >= body_size * _CHAPTER_TITLE_RATIO
 
 
 def _median_font_size(blocks_by_page: dict[int, list[Block]]) -> float:
@@ -173,11 +218,19 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
     confirmed_page_numbers: list[Block] = []
 
     for page_num, blocks in blocks_by_page.items():
+        edges = _edge_blocks(blocks)
         for b in blocks:
             if b.kind != "text" or not b.text.strip():
                 continue
             band = _band(b)
             if band is None:
+                edge = edges.get(b.block_id)
+                if edge is not None:
+                    # Outside the fixed bands but first or last on its page:
+                    # furniture only if it repeats like furniture.
+                    key = (_normalize(b.text), edge)
+                    occurrences[key].add(page_num)
+                    candidates[key].append(b)
                 continue
 
             # The display-type guard protects a chapter number above its title;
@@ -224,6 +277,11 @@ def detect_furniture(blocks_by_page: dict[int, list[Block]]) -> dict[str, BlockR
             band = key[1]
             role = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
             for b in candidates[key]:
+                # A chapter opening set in display type at the top of its page
+                # can carry the very words of the running head over the pages
+                # after it -- "GİRİŞ" over "Giriş" -- and is the chapter's title.
+                if _is_chapter_title_type(b, body_size):
+                    continue
                 furniture[b.block_id] = role
 
     _remove_misread_running_heads(candidates, furniture, body_size)
@@ -255,7 +313,10 @@ def _remove_misread_running_heads(
     """
     proven: dict[str, list[str]] = defaultdict(list)
     for (key, band), blocks in candidates.items():
-        if len(key) >= _MIN_HEAD_KEY_CHARS and all(b.block_id in furniture for b in blocks):
+        # Proven by most of its occurrences: one of them may be a title page
+        # in display type that was rightly kept.
+        marked = sum(1 for b in blocks if b.block_id in furniture)
+        if len(key) >= _MIN_HEAD_KEY_CHARS and marked >= max(1, len(blocks) * 0.8):
             proven[band].append(key)
     if not proven:
         return
@@ -270,9 +331,10 @@ def _remove_misread_running_heads(
         ):
             continue
         for b in blocks:
-            if "\n" in b.text.strip():
+            # A head and its folio may come as two lines of one block.
+            if b.text.strip().count("\n") >= _EDGE_MAX_LINES or len(b.text.strip()) > _EDGE_MAX_CHARS:
                 continue
-            if body_size and b.font_size and b.font_size > body_size * 1.05:
+            if _is_chapter_title_type(b, body_size):
                 continue
             furniture[b.block_id] = BlockRole.HEADER if band == "top" else BlockRole.FOOTER
 

@@ -1,0 +1,85 @@
+{
+  "_comment": "Real books the audit converts. Public-domain scans, CC-licensed and open-access publications only; the PDFs themselves are never committed (see fetch.py). Each entry names the layout family it stands for, so a gap in coverage is visible here. Arabic-script (Ottoman) scans were tried and left out: the app reads Latin and right-to-left Arabic/Hebrew/Persian text layers, not Ottoman OCR.",
+  "books": [
+    {
+      "name": "tr-scan-novel-1943",
+      "family": "scanned, OCR text layer, Turkish prose",
+      "url": "https://archive.org/download/saknaldanmainanm00kara/saknaldanmainanm00kara.pdf"
+    },
+    {
+      "name": "tr-scan-magazine-1940",
+      "family": "scanned, OCR text layer, magazine with columns",
+      "url": "https://archive.org/download/MEBTercmeSayy11940/MEB%20-%20Terc%C3%BCme%20Say%C4%B1%201%201940.pdf"
+    },
+    {
+      "name": "tr-scan-novel-kurk-mantolu",
+      "family": "scanned 1943 Turkish novel",
+      "url": "https://archive.org/download/kurkmantolumadonna/1675-Kurk_Mantoli_Madonna-Hikaye-Sabahetdin_Ali-Istanbul-1943-179s%281%29.pdf"
+    },
+    {
+      "name": "tr-digital-edited-volume",
+      "family": "born-digital Turkish edited academic volume",
+      "url": "https://zenodo.org/api/records/18156013/files/%C4%B0n%C5%9Faat%20M%C3%BChendisli%C4%9Fi.pdf/content"
+    },
+    {
+      "name": "tr-scan-medicine-1936",
+      "family": "scanned, OCR text layer, Turkish nonfiction with folios",
+      "url": "https://archive.org/download/b31364160/b31364160.pdf"
+    },
+    {
+      "name": "tr-scan-history-1948",
+      "family": "scanned, OCR text layer, Turkish local history with photographs",
+      "url": "https://archive.org/download/kirklarelivilayetitarihicilt21948dursunkaya/kirklarelivilayetitarihicilt21948dursunkaya.pdf"
+    },
+    {
+      "name": "tr-scan-phrasebook-1930",
+      "family": "scanned, OCR text layer, numbered phrase lists",
+      "url": "https://archive.org/download/turkishenglishco00hale/turkishenglishco00hale.pdf"
+    },
+    {
+      "name": "tr-article-history",
+      "family": "born-digital Turkish journal article",
+      "url": "https://zenodo.org/api/records/20205292/files/T%C3%BCrk%20Askeri%20K%C3%BClt%C3%BCr%C3%BCnde.pdf/content"
+    },
+    {
+      "name": "tr-article-engineering",
+      "family": "born-digital Turkish journal article with tables",
+      "url": "https://zenodo.org/api/records/14634522/files/BUTS_5_2(2024)(4).pdf/content"
+    },
+    {
+      "name": "tr-article-linguistics",
+      "family": "born-digital Turkish journal article with examples",
+      "url": "https://zenodo.org/api/records/23262229/files/18.%20Torun,%20F.%20(2026).%20Eski%20Uygurca%20Altun%20Yaruk%E2%80%99ta%20Dilbilgisel-SON.pdf/content"
+    },
+    {
+      "name": "en-scan-novel-1898",
+      "family": "scanned, OCR text layer, English novel",
+      "url": "https://archive.org/download/studyinscarletno00doyl/studyinscarletno00doyl.pdf"
+    },
+    {
+      "name": "en-scan-novel-1908",
+      "family": "scanned, OCR text layer, English novel",
+      "url": "https://archive.org/download/smokygodorvoyage00emer/smokygodorvoyage00emer.pdf"
+    },
+    {
+      "name": "en-scan-novel-1912",
+      "family": "scanned, OCR text layer, English novel",
+      "url": "https://archive.org/download/excoloredman00johnrich/excoloredman00johnrich.pdf"
+    },
+    {
+      "name": "en-paper-two-column",
+      "family": "born-digital two-column paper",
+      "url": "https://arxiv.org/pdf/1512.03385"
+    },
+    {
+      "name": "en-paper-single-column",
+      "family": "born-digital paper with equations",
+      "url": "https://arxiv.org/pdf/1406.2661"
+    },
+    {
+      "name": "en-paper-tables",
+      "family": "born-digital paper with tables and figures",
+      "url": "https://arxiv.org/pdf/1706.03762"
+    }
+  ]
+}

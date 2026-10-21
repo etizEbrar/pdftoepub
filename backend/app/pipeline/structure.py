@@ -15,6 +15,8 @@ NUMBERED_RE = re.compile(r"^(\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)]\s+")
 # An extract is usually set a point or two down from the body; more than this
 # and it is note-sized rather than quote-sized.
 _QUOTE_MAX_SIZE_RATIO = 0.96
+# Multi-line blocks a page needs before its own left margin is trusted.
+_MIN_PAGE_MARGIN_BLOCKS = 2
 # "Tablo 6: ...", "Şekil 8: ...", "Figure 2. ..." — a label naming the figure or
 # table it belongs to. Captions are set smaller and often indented, which is
 # exactly the shape of a block quote, so without this they were reconstructed as
@@ -128,7 +130,7 @@ _FOOTNOTE_PAGE_FRACTION = 0.66
 
 
 def _first_line_of_paragraph(
-    ordered: list[Block], index: int, left_margins: dict[int, float], body_size: float
+    ordered: list[Block], index: int, margin_of, body_size: float
 ) -> bool:
     """A lone indented line with the next line back at the margin.
 
@@ -146,7 +148,7 @@ def _first_line_of_paragraph(
     )
     if following is None or following.page != block.page or following.column != block.column:
         return False
-    margin = left_margins.get(block.column, following.bbox[0])
+    margin = margin_of(following)
     return following.bbox[0] <= margin + max(body_size * 0.5, 3.0)
 
 
@@ -339,6 +341,23 @@ def classify_blocks(
         left_margins[key] = min(left_margins.get(key, b.bbox[0]), b.bbox[0])
     for key, values in edges.items():
         left_margins[key] = statistics.median(values)
+    # And per page where the page says: a scan sits further left or right on
+    # every leaf, and against the book's median margin every block of a
+    # right-hand page counted as indented -- and, in slightly smaller type,
+    # as a quotation that cut its paragraph in two.
+    page_edges: dict[tuple[int, int], list[float]] = {}
+    for b in text_blocks:
+        if b.text.count("\n") >= 2:
+            page_edges.setdefault((b.page, b.column), []).append(b.bbox[0])
+    page_margins = {
+        key: statistics.median(values)
+        for key, values in page_edges.items()
+        if len(values) >= _MIN_PAGE_MARGIN_BLOCKS
+    }
+
+    def margin_of(block: Block) -> float:
+        return page_margins.get((block.page, block.column), left_margins.get(block.column, block.bbox[0]))
+
     toc_pages = toc_module.detect_toc_pages(text_blocks)
 
     nodes: list[StructuralNode] = []
@@ -378,7 +397,7 @@ def classify_blocks(
         first_line = _first_line(plain)
         gap_above = _gap_above(ordered_blocks, i)
         gap_below = _gap_below(ordered_blocks, i)
-        indented = b.bbox[0] > left_margins.get(b.column, b.bbox[0]) + max(body_size * 1.2, 8)
+        indented = b.bbox[0] > margin_of(b) + max(body_size * 1.2, 8)
 
         role = BlockRole.PARAGRAPH
         level = None
@@ -500,7 +519,7 @@ def classify_blocks(
             indented
             and (b.italic or _is_smaller_than_body(b, body_size))
             and b.page in pages_with_body_size_text
-            and not _first_line_of_paragraph(ordered_blocks, i, left_margins, body_size)
+            and not _first_line_of_paragraph(ordered_blocks, i, margin_of, body_size)
         ):
             # Italics are one way to mark an extract; a smaller measure set
             # in from the margin is just as common and was being flattened
@@ -581,6 +600,11 @@ def _continues_caption(
         return False
     gap = below.bbox[1] - above.bbox[3]
     if gap > max(above.font_size * _CAPTION_LINE_GAP_RATIO, 4.0):
+        return False
+    # A caption's last line is no wider than its first. The paragraph after a
+    # figure is set to the full measure, and centred on the page just as a
+    # caption is: one article's text after "Şekil 5" became part of its caption.
+    if (below.bbox[2] - below.bbox[0]) > (above.bbox[2] - above.bbox[0]) + below.font_size * 2:
         return False
     above_centre = (above.bbox[0] + above.bbox[2]) / 2
     below_centre = (below.bbox[0] + below.bbox[2]) / 2
